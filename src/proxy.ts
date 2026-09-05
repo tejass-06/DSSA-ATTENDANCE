@@ -1,6 +1,6 @@
 /**
  * DSSA Room Attendance System — Route Protection (proxy.ts)
- * Next.js 16 App Router Proxy / Middleware
+ * Next.js 16 App Router Proxy (src/proxy.ts)
  * Clerk authentication protects dashboard, admin, host, attendance, profile, settings routes.
  * Dev testing routes (/api/dev/*) are strictly locked in production.
  */
