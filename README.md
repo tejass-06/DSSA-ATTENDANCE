@@ -38,6 +38,31 @@ Located in `src/lib/auth/server.ts`:
 - `requireRole(minimumRole)`: Verifies role hierarchy server-side; redirects unauthorized users to `/unauthorized`.
 - `requireAnyRole([roles])`: Enforces exact role whitelist server-side.
 
+## ⚡ Realtime Live Attendance System (Phase 15)
+
+Located in `src/lib/realtime/`, `src/hooks/useLiveAttendance.ts`, `src/components/host/LiveAttendanceFeed.tsx`, and `src/app/api/realtime/auth/route.ts`:
+
+- **Architectural Separation:**
+  - **Database Authority:** MySQL + Prisma (`AttendanceRecord`) is the sole source of truth. Realtime is an event delivery layer.
+  - **Server Transaction Guarantee:** Realtime events (`attendance:recorded`) are published **only after** the database transaction successfully commits `AttendanceRecord` and `AuditLog`.
+  - **Failure Isolation:** If realtime delivery or network connectivity fails, attendance creation remains 100% valid. The host UI automatically reconciles against the database snapshot via manual or automatic sync.
+- **Vercel / Serverless-Compatible Pub/Sub:**
+  - Uses managed WebSocket infrastructure (`pusher` on server via REST API + `pusher-js` on client) compatible with stateless serverless execution.
+  - Graceful development/test fallback mode when environment credentials are not present.
+- **Private Channel Authorization (`POST /api/realtime/auth`):**
+  - Subscriptions are strictly isolated by session (`private-session-<sessionId>`).
+  - **HOST:** Authorized only if they own the specific session (`session.hostUserId === user.id`).
+  - **ADMIN / SUPER_ADMIN:** Authorized to monitor sessions system-wide.
+  - **MEMBER / PENDING:** Strictly rejected (HTTP 403) from subscribing to privileged host/admin channels.
+- **Live Host Experience:**
+  - Integrated into Host Mode (`/host` & `/host/sessions/[id]`) with live connection state badges (`LIVE`, `RECONNECTING`, `SYNCED`), deduplicated attendee list, and real-time headcount counter.
+- **Zero-Trust Privacy & Idempotency:**
+  - Events contain only sanitized display fields (`attendanceId`, `sessionId`, `attendeeName`, `status`, `markedAt`).
+  - Zero raw tokens, zero hashes, and zero GPS coordinates are transmitted over realtime channels.
+  - Client state uses unique key tracking (`seenIdsRef`) to guarantee zero duplicate rows or counter inflation on duplicate event delivery.
+
+---
+
 ## 🛡️ Advanced Anti-Proxy Hardening (Phase 14)
 
 Located in `src/lib/security/`, `src/lib/attendance/service.ts`, and `src/app/api/dev/anti-proxy-test/route.ts`:
@@ -204,9 +229,9 @@ The Administrative Control Center is located at `/admin` and strictly requires `
 - [x] **Phase 11: Geolocation Capture + Location Validation**
 - [x] **Phase 12: Room Geofencing + Attendance Boundary Enforcement**
 - [x] **Phase 13: Duplicate Protection + Server Validation Hardening**
-- [x] **Phase 14: Advanced Anti-Proxy Hardening** *(Completed)*
-- [ ] **Phase 15: Live Attendance** *(Next)*
-- [ ] **Phase 16: Attendance History** *(Planned)*
+- [x] **Phase 14: Advanced Anti-Proxy Hardening**
+- [x] **Phase 15: Live Attendance** *(Completed)*
+- [ ] **Phase 16: Attendance History** *(Next)*
 - [ ] **Phase 17: CSV Export** *(Planned)*
 - [ ] **Phase 18: Room Management** *(Planned)*
 - [ ] **Phase 19: Profile & Settings** *(Planned)*

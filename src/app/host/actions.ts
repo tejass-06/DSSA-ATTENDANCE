@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { requireRole } from "@/lib/auth/server";
 import { appRoleToPrismaRole, type AppRole } from "@/lib/auth/roles";
 import { isValidSessionTransition } from "@/lib/session/lifecycle";
+import { publishSessionStateChanged } from "@/lib/realtime/publisher";
 import { SessionStatus } from "@prisma/client";
 
 export type SessionActionResult =
@@ -119,6 +120,13 @@ export async function startHostSession(roomId: string, customTitle?: string): Pr
     revalidatePath("/admin");
     revalidatePath("/admin/sessions");
 
+    // 6. Publish Realtime session event
+    void publishSessionStateChanged(createdSession.id, {
+      sessionId: createdSession.id,
+      status: "ACTIVE",
+      updatedAt: new Date().toISOString(),
+    });
+
     return { success: true, session: createdSession };
   } catch (error) {
     const rawMessage = error instanceof Error ? error.message : "An unexpected error occurred.";
@@ -215,6 +223,13 @@ export async function endHostSession(sessionId: string): Promise<SessionActionRe
     revalidatePath("/admin");
     revalidatePath("/admin/sessions");
 
+    // 8. Publish Realtime session ended event
+    void publishSessionStateChanged(sessionId, {
+      sessionId,
+      status: "ENDED",
+      updatedAt: new Date().toISOString(),
+    });
+
     return { success: true, session: updated };
   } catch (error) {
     console.error("Error ending host session:", error);
@@ -299,6 +314,13 @@ export async function cancelHostSession(sessionId: string): Promise<SessionActio
     revalidatePath("/host/sessions");
     revalidatePath("/admin");
     revalidatePath("/admin/sessions");
+
+    // 8. Publish Realtime session cancelled event
+    void publishSessionStateChanged(sessionId, {
+      sessionId,
+      status: "CANCELLED",
+      updatedAt: new Date().toISOString(),
+    });
 
     return { success: true, session: updated };
   } catch (error) {

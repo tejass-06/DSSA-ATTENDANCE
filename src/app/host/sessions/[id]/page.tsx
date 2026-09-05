@@ -9,6 +9,7 @@ import { Footer } from "@/components/Footer";
 import { HostHeader } from "@/components/host/HostHeader";
 import { AdminBadge } from "@/components/admin/AdminBadge";
 import { RotatingQRDisplay } from "@/components/host/RotatingQRDisplay";
+import { LiveAttendanceFeed } from "@/components/host/LiveAttendanceFeed";
 import {
   Calendar,
   Clock,
@@ -266,6 +267,12 @@ export default async function HostSessionDetailPage({ params }: HostSessionDetai
                 </span>
               </div>
             )}
+
+            {/* Realtime Live Attendance Feed (Phase 15) */}
+            <LiveAttendanceFeed
+              sessionId={session.id}
+              initialTotalPresent={session._count.records}
+            />
           </div>
         </div>
       </main>

@@ -14,6 +14,7 @@ import { calculateHaversineDistanceMeters } from "@/lib/geo/distance";
 import { checkAttendanceSubmissionRateLimit } from "@/lib/security/rateLimiter";
 import { logSecurityEvent, SECURITY_ACTIONS } from "@/lib/security/signals";
 import { sanitizeClientContext } from "@/lib/security/context";
+import { publishAttendanceRecorded } from "@/lib/realtime/publisher";
 import { Prisma } from "@prisma/client";
 
 export interface AttendanceSubmissionResult {
@@ -368,6 +369,17 @@ export async function processAttendanceSubmission(
       });
 
       return { record, sessionTitle: currentSession.title, roomName: currentSession.room.name, roomCode: currentSession.room.code, dist: txDist };
+    });
+
+    // 10. Publish Realtime Live Event (Non-blocking / Best-Effort Delivery)
+    void publishAttendanceRecorded(session.id, {
+      attendanceId: newRecord.record.id,
+      sessionId: session.id,
+      userId: dbUser.id,
+      attendeeName: userContext.name,
+      status: "PRESENT",
+      markedAt: serverMarkedAt.toISOString(),
+      distanceMeters: Math.round(newRecord.dist),
     });
 
     return {

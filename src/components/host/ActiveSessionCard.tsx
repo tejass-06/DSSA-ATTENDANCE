@@ -13,6 +13,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { RotatingQRDisplay } from "./RotatingQRDisplay";
+import { LiveAttendanceFeed } from "./LiveAttendanceFeed";
 
 interface ActiveSessionData {
   id: string;
@@ -132,11 +133,17 @@ export function ActiveSessionCard({ session }: ActiveSessionCardProps) {
             <div className="text-sm font-semibold text-white">
               {session.attendeesCount} Attendee{session.attendeesCount === 1 ? "" : "s"} Recorded
             </div>
-            <div className="text-[11px] font-sans text-zinc-500 pt-1">
-              Live headcount streaming will be activated in later phases.
+            <div className="text-[11px] font-mono text-cyan-400/80 pt-1">
+              Live updates active via secure private channel.
             </div>
           </div>
         </div>
+
+        {/* Realtime Live Attendance Feed (Phase 15) */}
+        <LiveAttendanceFeed
+          sessionId={session.id}
+          initialTotalPresent={session.attendeesCount}
+        />
 
         {/* Session Controls */}
         <div className="pt-2 border-t border-white/[0.06] space-y-3">
