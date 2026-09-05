@@ -53,9 +53,10 @@ export async function POST(req: Request) {
       );
     }
 
-    // Parse payload and location from body
+    // Parse payload, location, and optional context from body
     let rawPayload: unknown = body;
     let locationInput: unknown = undefined;
+    let clientContextInput: unknown = undefined;
 
     if (body && typeof body === "object") {
       const obj = body as Record<string, unknown>;
@@ -73,9 +74,12 @@ export async function POST(req: Request) {
           accuracy: obj.accuracy,
         };
       }
+      if ("context" in obj) {
+        clientContextInput = obj.context;
+      }
     }
 
-    const result = await processAttendanceSubmission(user, rawPayload, locationInput);
+    const result = await processAttendanceSubmission(user, rawPayload, locationInput, clientContextInput);
 
     const status = result.success
       ? 200
@@ -83,6 +87,8 @@ export async function POST(req: Request) {
       ? 401
       : result.errorCode === "UNAUTHORIZED_ROLE"
       ? 403
+      : result.errorCode === "RATE_LIMITED"
+      ? 429
       : 400;
 
     return NextResponse.json(result, {

@@ -8,6 +8,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { generateQRChallenge } from "@/lib/qr/service";
 import { processAttendanceSubmission } from "@/lib/attendance/service";
+import { globalRateLimiter } from "@/lib/security/rateLimiter";
 import { AppRole, SessionStatus, AttendanceStatus } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
@@ -396,6 +397,7 @@ export async function GET() {
     });
 
     // --- TEST 12: Client attempts to submit fake user ID in payload ---
+    globalRateLimiter.resetAll();
     const fakeUserIdPayload = JSON.stringify({
       v: "DSSA_ATT_V1",
       sid: sessionB.id,

@@ -7,6 +7,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { generateQRChallenge } from "@/lib/qr/service";
+import { globalRateLimiter } from "@/lib/security/rateLimiter";
 import { processAttendanceSubmission } from "@/lib/attendance/service";
 import { AppRole, SessionStatus } from "@prisma/client";
 
@@ -153,6 +154,9 @@ export async function GET() {
       passed: c2Successes === 2 && memARecords.length === 1,
     });
 
+    // Reset rate limiter for isolated suite execution
+    globalRateLimiter.resetAll();
+
     // Test 2: Same member, same QR, 10 rapid concurrent requests
     const tenPromises = Array.from({ length: 10 }).map(() =>
       processAttendanceSubmission(memberBContext, challengeA1.payload, validInsideLocation)
@@ -161,13 +165,13 @@ export async function GET() {
     const memBRecords = await prisma.attendanceRecord.findMany({
       where: { sessionId: sessionA.id, userId: memberUserB.id },
     });
-    const tenSuccesses = tenResults.filter((r) => r.success).length;
+    const tenHandledSafely = tenResults.filter((r) => r.success || r.errorCode === "RATE_LIMITED").length;
     results.push({
       testNumber: 2,
       name: "Concurrency: 10 rapid concurrent submissions (same member)",
-      expected: "All 10 resolve safely, exactly 1 DB record created",
-      actual: `Successes=${tenSuccesses}/10, TotalDBRecords=${memBRecords.length}`,
-      passed: tenSuccesses === 10 && memBRecords.length === 1,
+      expected: "All 10 resolve safely (success/duplicate or rate-limited), exactly 1 DB record created",
+      actual: `HandledSafely=${tenHandledSafely}/10, TotalDBRecords=${memBRecords.length}`,
+      passed: tenHandledSafely === 10 && memBRecords.length === 1,
     });
 
     // Test 3: Same member, different valid QR challenge for same session

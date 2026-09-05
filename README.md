@@ -38,6 +38,25 @@ Located in `src/lib/auth/server.ts`:
 - `requireRole(minimumRole)`: Verifies role hierarchy server-side; redirects unauthorized users to `/unauthorized`.
 - `requireAnyRole([roles])`: Enforces exact role whitelist server-side.
 
+## 🛡️ Advanced Anti-Proxy Hardening (Phase 14)
+
+Located in `src/lib/security/`, `src/lib/attendance/service.ts`, and `src/app/api/dev/anti-proxy-test/route.ts`:
+
+- **Layered Threat Mitigation Model:**
+  - **QR & Screenshot Sharing (WhatsApp/Telegram):** Mitigated by short 10s rotation TTL + server-side session binding + active geofence verification.
+  - **Remote Proxy Scanning:** Rejected by server-side Haversine geofence calculation against authoritative database room venue.
+  - **Automated Hammering & Brute Force:** Controlled via sliding-window rate limiting with bursts permitted for legitimate retries (5 requests / 10s burst; 20 requests / 60s sustained).
+  - **Client Spoofing Claims:** Client-submitted `trustedDevice`, `isTrusted`, `riskScore`, `bypassGeofence`, fake context IDs, fake room IDs, or fake coordinates are strictly ignored.
+- **Privacy-Conscious Design:**
+  - **NO Invasive Device Fingerprinting:** Strictly avoids Canvas, WebGL, font fingerprinting, hardware identifiers, MAC addresses, or IMEI numbers.
+  - **Privacy-Preserving Audit Logging:** Security audit events (`RATE_LIMITED`, `QR_INVALID`, `QR_EXPIRED`, `LOCATION_OUTSIDE`, `LOCATION_UNCERTAIN`, `UNAUTHORIZED_ATTEMPT`) store only sanitized metadata—never raw coordinates or cryptographic tokens.
+- **Server-Side Authority Principle:**
+  - Authenticated identity (`auth().userId`), database application role (`User.role`), rotating challenge validity, room status, geofence status, and timestamp are independently computed and verified by the server.
+- **Realistic Security Boundary:**
+  - Browser geolocation and rotating QR codes represent defensive layers in depth. No client-side mechanism mathematically proves physical presence without trusted hardware; the system makes proxy attendance difficult, unrewarding, and auditable.
+
+---
+
 ## 🛡️ Duplicate Protection & Server Validation Hardening (Phase 13)
 
 Located in `src/lib/attendance/service.ts`, `src/lib/qr/service.ts`, and `src/app/api/attendance/submit/route.ts`:
@@ -184,9 +203,9 @@ The Administrative Control Center is located at `/admin` and strictly requires `
 - [x] **Phase 10: Member QR Scanning + Attendance Submission**
 - [x] **Phase 11: Geolocation Capture + Location Validation**
 - [x] **Phase 12: Room Geofencing + Attendance Boundary Enforcement**
-- [x] **Phase 13: Duplicate Protection + Server Validation Hardening** *(Completed)*
-- [ ] **Phase 14: Anti-Proxy Hardening** *(Next)*
-- [ ] **Phase 15: Live Attendance** *(Planned)*
+- [x] **Phase 13: Duplicate Protection + Server Validation Hardening**
+- [x] **Phase 14: Advanced Anti-Proxy Hardening** *(Completed)*
+- [ ] **Phase 15: Live Attendance** *(Next)*
 - [ ] **Phase 16: Attendance History** *(Planned)*
 - [ ] **Phase 17: CSV Export** *(Planned)*
 - [ ] **Phase 18: Room Management** *(Planned)*

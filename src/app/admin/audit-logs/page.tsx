@@ -74,10 +74,24 @@ export default async function AdminAuditLogsPage() {
                     key={log.id}
                     className="hover:bg-white/[0.02] transition-colors"
                   >
-                    <td className="py-4 px-4 sm:px-6 text-cyan-300 font-semibold">
-                      <span className="rounded bg-cyan-950/40 border border-cyan-500/20 px-2 py-0.5">
-                        {log.action}
-                      </span>
+                    <td className="py-4 px-4 sm:px-6 font-semibold">
+                      {log.action.includes("RATE_LIMITED") || log.action.includes("UNAUTHORIZED") ? (
+                        <span className="rounded bg-rose-950/50 border border-rose-500/30 text-rose-300 px-2 py-0.5">
+                          {log.action}
+                        </span>
+                      ) : log.action.includes("QR_") || log.action.includes("LOCATION_") ? (
+                        <span className="rounded bg-amber-950/50 border border-amber-500/30 text-amber-300 px-2 py-0.5">
+                          {log.action}
+                        </span>
+                      ) : log.action.includes("ATTENDANCE_RECORDED") ? (
+                        <span className="rounded bg-emerald-950/50 border border-emerald-500/30 text-emerald-300 px-2 py-0.5">
+                          {log.action}
+                        </span>
+                      ) : (
+                        <span className="rounded bg-cyan-950/40 border border-cyan-500/20 text-cyan-300 px-2 py-0.5">
+                          {log.action}
+                        </span>
+                      )}
                     </td>
                     <td className="py-4 px-4 sm:px-6 text-zinc-300">
                       {log.actor ? (

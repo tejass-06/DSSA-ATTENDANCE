@@ -13,8 +13,9 @@ import type { ClientLocationInput } from "@/lib/geo/service";
  */
 export async function submitAttendanceAction(
   rawPayload: string,
-  locationInput?: ClientLocationInput
+  locationInput?: ClientLocationInput,
+  clientContextInput?: unknown
 ): Promise<AttendanceSubmissionResult> {
   const user = await getCurrentUserWithRole();
-  return processAttendanceSubmission(user, rawPayload, locationInput);
+  return processAttendanceSubmission(user, rawPayload, locationInput, clientContextInput);
 }

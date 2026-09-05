@@ -11,6 +11,9 @@ import { appRoleToPrismaRole, hasMinimumRole, type AppRole } from "@/lib/auth/ro
 import { validateMemberLocation, type ClientLocationInput } from "@/lib/geo/service";
 import { evaluateGeofence } from "@/lib/geo/geofence";
 import { calculateHaversineDistanceMeters } from "@/lib/geo/distance";
+import { checkAttendanceSubmissionRateLimit } from "@/lib/security/rateLimiter";
+import { logSecurityEvent, SECURITY_ACTIONS } from "@/lib/security/signals";
+import { sanitizeClientContext } from "@/lib/security/context";
 import { Prisma } from "@prisma/client";
 
 export interface AttendanceSubmissionResult {
@@ -45,7 +48,8 @@ export interface UserContextParam {
 export async function processAttendanceSubmission(
   userContext: UserContextParam | null,
   rawPayloadInput: unknown,
-  locationInput?: ClientLocationInput | unknown
+  locationInput?: ClientLocationInput | unknown,
+  clientContextInput?: unknown
 ): Promise<AttendanceSubmissionResult> {
   // 1. Authenticate member
   if (!userContext || !userContext.userId || typeof userContext.userId !== "string") {
@@ -56,8 +60,31 @@ export async function processAttendanceSubmission(
     };
   }
 
+  // 1b. Rate Limiting Check (Anti-Abuse / Anti-Hammering)
+  const rateLimitCheck = checkAttendanceSubmissionRateLimit(userContext.userId);
+  if (!rateLimitCheck.allowed) {
+    // Non-blocking security audit log
+    void logSecurityEvent(null, SECURITY_ACTIONS.RATE_LIMITED, userContext.userId, {
+      reason: rateLimitCheck.reason || "RATE_LIMIT_EXCEEDED",
+    });
+
+    return {
+      success: false,
+      error: "Too many attempts. Please wait a moment and try again.",
+      errorCode: "RATE_LIMITED",
+    };
+  }
+
+  // 1c. Sanitize Client Context (Discard client trust claims)
+  const { contextId } = sanitizeClientContext(clientContextInput);
+
   // 2. Validate role: MEMBER or higher required; PENDING rejected
   if (!hasMinimumRole(userContext.role, "MEMBER")) {
+    void logSecurityEvent(null, SECURITY_ACTIONS.UNAUTHORIZED_ATTEMPT, userContext.userId, {
+      reason: "PENDING_ROLE_SUBMISSION",
+      contextId,
+    });
+
     return {
       success: false,
       error: "Your account is currently pending verification and cannot mark attendance.",
@@ -141,6 +168,17 @@ export async function processAttendanceSubmission(
     const code = rawError.split(":")[0].trim();
     let message = "Invalid or expired QR code.";
 
+    const secAction =
+      code === "CHALLENGE_EXPIRED"
+        ? SECURITY_ACTIONS.QR_EXPIRED
+        : SECURITY_ACTIONS.QR_INVALID;
+
+    void logSecurityEvent(null, secAction, sid || userContext.userId, {
+      sessionId: sid,
+      reason: code,
+      contextId,
+    });
+
     if (code === "CHALLENGE_EXPIRED") {
       message = "This QR code has expired. Please scan the current rotating QR on the screen.";
     } else if (code === "SESSION_INACTIVE") {
@@ -161,6 +199,19 @@ export async function processAttendanceSubmission(
   // 6. Geolocation & Geofence Validation (Phase 11 & Phase 12 service)
   const locationValidation = await validateMemberLocation(session.id, locationInput);
   if (!locationValidation.valid) {
+    const geoAction =
+      locationValidation.errorCode === "LOCATION_UNCERTAIN"
+        ? SECURITY_ACTIONS.LOCATION_UNCERTAIN
+        : SECURITY_ACTIONS.LOCATION_OUTSIDE;
+
+    void logSecurityEvent(null, geoAction, session.id, {
+      sessionId: session.id,
+      reason: locationValidation.errorCode || "LOCATION_OUTSIDE",
+      distanceMeters: locationValidation.distanceMeters,
+      accuracyMeters: locationValidation.accuracyMeters,
+      contextId,
+    });
+
     return {
       success: false,
       error: locationValidation.error || "Location verification failed.",
