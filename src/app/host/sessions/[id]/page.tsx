@@ -8,6 +8,7 @@ import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
 import { HostHeader } from "@/components/host/HostHeader";
 import { AdminBadge } from "@/components/admin/AdminBadge";
+import { RotatingQRDisplay } from "@/components/host/RotatingQRDisplay";
 import {
   Calendar,
   Clock,
@@ -246,18 +247,25 @@ export default async function HostSessionDetailPage({ params }: HostSessionDetai
               </div>
             </div>
 
-            {/* QR Channel Status */}
-            <div className="rounded-xl border border-white/[0.06] bg-zinc-950/60 p-4 flex items-center justify-between gap-3 text-xs font-mono">
-              <div className="flex items-center gap-2.5">
-                <QrCode className="h-4 w-4 text-cyan-400" />
-                <span className="text-zinc-300">
-                  Dynamic Rotating QR Challenges: <strong className="text-white">{session._count.qrChallenges} generated</strong>
+            {/* QR Channel Status or Live Rotating Broadcast */}
+            {session.status === "ACTIVE" ? (
+              <RotatingQRDisplay
+                sessionId={session.id}
+                isSessionActive={true}
+              />
+            ) : (
+              <div className="rounded-xl border border-white/[0.06] bg-zinc-950/60 p-4 flex items-center justify-between gap-3 text-xs font-mono">
+                <div className="flex items-center gap-2.5">
+                  <QrCode className="h-4 w-4 text-zinc-500" />
+                  <span className="text-zinc-300">
+                    Dynamic Rotating QR Challenges: <strong className="text-white">{session._count.qrChallenges} generated</strong> during session
+                  </span>
+                </div>
+                <span className="text-[11px] text-zinc-500">
+                  Channel closed ({session.status})
                 </span>
               </div>
-              <span className="text-[11px] text-zinc-500">
-                Channel protocol v1.0
-              </span>
-            </div>
+            )}
           </div>
         </div>
       </main>

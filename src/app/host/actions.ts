@@ -310,3 +310,76 @@ export async function cancelHostSession(sessionId: string): Promise<SessionActio
     };
   }
 }
+
+/**
+ * Server Action: Generate a fresh rotating QR challenge for an ACTIVE host session
+ */
+export async function fetchLiveQRChallenge(sessionId: string): Promise<{
+  success: boolean;
+  challenge?: {
+    challengeId: string;
+    payload: string;
+    issuedAt: Date;
+    expiresAt: Date;
+    ttlMs: number;
+  };
+  error?: string;
+  message?: string;
+}> {
+  try {
+    const authUser = await requireRole("HOST");
+
+    if (!sessionId || typeof sessionId !== "string") {
+      return { success: false, error: "INVALID_INPUT", message: "A valid Session ID is required." };
+    }
+
+    const dbUser = await getOrCreateDbUser(
+      authUser.userId,
+      authUser.email,
+      authUser.name,
+      authUser.role
+    );
+
+    // Verify session existence and ownership
+    const session = await prisma.attendanceSession.findUnique({
+      where: { id: sessionId },
+      select: { id: true, hostUserId: true, status: true },
+    });
+
+    if (!session) {
+      return { success: false, error: "NOT_FOUND", message: "Session not found." };
+    }
+
+    if (session.status !== SessionStatus.ACTIVE) {
+      return { success: false, error: "SESSION_INACTIVE", message: `Session is not active (status: ${session.status}).` };
+    }
+
+    const isOwner = session.hostUserId === dbUser.id;
+    const isElevatedAdmin = authUser.role === "ADMIN" || authUser.role === "SUPER_ADMIN";
+
+    if (!isOwner && !isElevatedAdmin) {
+      return { success: false, error: "UNAUTHORIZED", message: "You are not authorized to generate QR codes for this session." };
+    }
+
+    const { generateQRChallenge } = await import("@/lib/qr/service");
+    const challenge = await generateQRChallenge(sessionId);
+
+    return {
+      success: true,
+      challenge: {
+        challengeId: challenge.challengeId,
+        payload: challenge.payload,
+        issuedAt: challenge.issuedAt,
+        expiresAt: challenge.expiresAt,
+        ttlMs: challenge.ttlMs,
+      },
+    };
+  } catch (error) {
+    const rawMessage = error instanceof Error ? error.message : "An unexpected error occurred.";
+    return {
+      success: false,
+      error: "SERVER_ERROR",
+      message: rawMessage,
+    };
+  }
+}

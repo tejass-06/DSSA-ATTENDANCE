@@ -3,17 +3,16 @@
 import React, { useState, useTransition } from "react";
 import { endHostSession } from "@/app/host/actions";
 import {
-  Radio,
   Building,
   Clock,
   MapPin,
   Users,
-  QrCode,
   Square,
   Loader2,
   AlertCircle,
   ShieldCheck,
 } from "lucide-react";
+import { RotatingQRDisplay } from "./RotatingQRDisplay";
 
 interface ActiveSessionData {
   id: string;
@@ -95,26 +94,11 @@ export function ActiveSessionCard({ session }: ActiveSessionCardProps) {
           </div>
         )}
 
-        {/* QR Channel Presentation Box (Placeholder for Phase 9) */}
-        <div className="relative rounded-2xl border border-dashed border-cyan-500/40 bg-zinc-950/80 p-8 sm:p-12 text-center space-y-4">
-          <div className="mx-auto flex h-20 w-20 sm:h-24 sm:w-24 items-center justify-center rounded-2xl border border-cyan-500/30 bg-cyan-950/30 text-cyan-400 shadow-xl shadow-cyan-950/40">
-            <QrCode className="h-10 w-10 sm:h-12 sm:w-12 text-cyan-400" />
-          </div>
-
-          <div className="space-y-1.5 max-w-sm mx-auto">
-            <div className="font-mono text-sm font-bold uppercase tracking-wider text-cyan-300">
-              QR ATTENDANCE CHANNEL
-            </div>
-            <p className="text-xs text-zinc-400 font-sans leading-relaxed">
-              Rotating dynamic QR challenges with cryptographic anti-proxy verification will be activated in Phase 9.
-            </p>
-          </div>
-
-          <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-zinc-900/80 px-3.5 py-1 text-[11px] font-mono text-zinc-400">
-            <Radio className="h-3 w-3 text-cyan-400 animate-pulse" />
-            <span>CHANNEL RESERVED FOR BROADCAST</span>
-          </div>
-        </div>
+        {/* Dynamic Rotating QR Attendance Channel */}
+        <RotatingQRDisplay
+          sessionId={session.id}
+          isSessionActive={session.status === "ACTIVE"}
+        />
 
         {/* Room & Headcount Info Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
