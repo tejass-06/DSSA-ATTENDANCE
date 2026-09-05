@@ -8,8 +8,8 @@ Official, production-quality, mobile-first room attendance management system bui
 
 The DSSA Room Attendance System provides controlled, tamper-resistant digital attendance for DSSA meetings, workshops, and committee sessions.
 
-- **Host Mode (Admin/Host Phone):** The host uses their smartphone to start sessions, select rooms, generate dynamic rotating QR challenges, and monitor real-time headcount.
-- **Member Attendance (Member Phone):** Committee members authenticate on their phones, scan the rotating QR code, grant room geolocation access, and mark verified attendance.
+- **Host Mode (Admin/Host Phone):** The host uses their smartphone to select active venues, initiate room attendance sessions, and monitor operational telemetry.
+- **Member Attendance (Member Phone):** Committee members authenticate on their phones, scan dynamic QR challenges, grant room geolocation access, and mark verified attendance.
 - **Layered Anti-Proxy Security:** Combines Clerk authentication, dynamic rotating QR challenges, server-side room geofencing, database unique constraints, and audit logging to minimize proxy attendance.
 
 ---
@@ -26,9 +26,9 @@ The application enforces strict server-side authorization boundaries. A logged-i
 
 | Role | Hierarchy | Responsibilities & Access Boundaries |
 |---|:---:|---|
-| **`SUPER_ADMIN`** | 40 | Full system authority. System settings, administrator management, audit log access. |
-| **`ADMIN`** | 30 | Committee administration. Member management, room coordinates configuration, session overview, and report exports. |
-| **`HOST`** | 20 | Room session host. Starting active attendance sessions, displaying live rotating QR codes, and tracking live headcount. |
+| **`SUPER_ADMIN`** | 40 | Full system authority. System settings, administrator management, audit log access, host operations. |
+| **`ADMIN`** | 30 | Committee administration. Member management, room coordinates configuration, session overview, host operations. |
+| **`HOST`** | 20 | Room session host. Initiating active attendance sessions, managing room state, and concluding sessions. |
 | **`MEMBER`** | 10 | Active committee member. Scanning rotating QR challenges and viewing individual attendance records. |
 | **`PENDING`** | 0 | **Default for new accounts.** Awaiting administrator verification and role assignment. |
 
@@ -40,13 +40,26 @@ Located in `src/lib/auth/server.ts`:
 
 ---
 
+## 📱 Host Mode (Phase 7)
+
+Located at `/host` and accessible by `HOST`, `ADMIN`, and `SUPER_ADMIN`.
+
+### Features & Capabilities
+1. **Host Identity & Authorization:** Server-verified operator profile derived from Clerk session and synced with MySQL `users`.
+2. **Room Selection:** Real active venues queried from MySQL with touch-friendly selection cards, geofence radius display, and conflict indicators.
+3. **Session State Detection & Persistence:** Automatically detects existing `ACTIVE` sessions from MySQL on initial load and page refreshes.
+4. **Transactional Session Initiation:** Starts attendance sessions with Prisma transaction safety, preventing duplicate active sessions per host and per room.
+5. **Session Lifecycle Management:** Hosts can conclude active sessions with server-side validation and timestamp recording (`endsAt`).
+6. **QR Channel Placeholder:** Presentation-ready broadcast area reserved for Phase 9 dynamic QR rotation.
+
+> [!NOTE]
+> QR challenge generation (Phase 9), geolocation verification (Phases 11-12), and realtime WebSockets (Phase 15) are planned for subsequent phases.
+
+---
+
 ## 📊 Admin Dashboard Foundation (Phase 6)
 
 The Administrative Control Center is located at `/admin` and strictly requires `ADMIN` or `SUPER_ADMIN` authorization.
-
-### Access Control
-- **Authorized:** `ADMIN`, `SUPER_ADMIN`
-- **Blocked Server-Side:** `PENDING`, `MEMBER`, `HOST`, unauthenticated users (redirected to `/unauthorized` or `/sign-in`).
 
 ### Dashboard Sections
 1. **Overview (`/admin`):** Real-time database aggregations (Total Users, Active Members, Authorized Hosts, Active Rooms, Active Sessions, Total Attendance Check-ins, and Recent Activity).
@@ -56,9 +69,6 @@ The Administrative Control Center is located at `/admin` and strictly requires `
 5. **Sessions (`/admin/sessions`):** Real operational overview of scheduled, active, and completed attendance sessions with host and room relations.
 6. **Attendance (`/admin/attendance`):** Verified check-in records ledger with member names, session details, and marked timestamps.
 7. **Audit Logs (`/admin/audit-logs`):** Immutable security and operational event logs.
-
-> [!NOTE]
-> All statistics, tables, and lists are server-rendered Server Components directly querying MySQL via Prisma. Empty states are displayed when no data exists. Mutation controls (room creation, role editing, session starts, QR generation) are scheduled for subsequent phases.
 
 ---
 
@@ -81,9 +91,9 @@ The Administrative Control Center is located at `/admin` and strictly requires `
 - [x] **Phase 3: User Roles & Authorization**
 - [x] **Phase 4: Prisma + MySQL Database Foundation**
 - [x] **Phase 5: Database Models & Relationships**
-- [x] **Phase 6: Admin Dashboard Foundation** *(Completed)*
-- [ ] **Phase 7: Host Mode Foundation** *(Next)*
-- [ ] **Phase 8: Attendance Session Management** *(Planned)*
+- [x] **Phase 6: Admin Dashboard Foundation**
+- [x] **Phase 7: Host Mode Foundation** *(Completed)*
+- [ ] **Phase 8: Attendance Session Management** *(Next)*
 - [ ] **Phase 9: Rotating QR System** *(Planned)*
 - [ ] **Phase 10: Member Attendance Flow** *(Planned)*
 - [ ] **Phase 11: Geolocation Verification** *(Planned)*
