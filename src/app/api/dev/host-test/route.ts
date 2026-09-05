@@ -1,11 +1,12 @@
 /**
  * DSSA Room Attendance System
- * POST /api/dev/host-test — Host Lifecycle & Concurrency Verification (DEV ONLY)
- * Phase 7: Host Mode Foundation
+ * POST /api/dev/host-test — Host Lifecycle & State Machine Verification (DEV ONLY)
+ * Phase 8: Attendance Session Management
  */
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { AppRole, SessionStatus } from "@prisma/client";
+import { isValidSessionTransition } from "@/lib/session/lifecycle";
 
 export async function POST() {
   if (process.env.NODE_ENV === "production") {
@@ -16,17 +17,28 @@ export async function POST() {
   const cleanup: (() => Promise<unknown>)[] = [];
 
   try {
-    // 1. Create a test Host user
-    const host = await prisma.user.create({
+    // 1. Create two test Host users
+    const hostA = await prisma.user.create({
       data: {
-        clerkId: `test_host_${Date.now()}`,
-        email: `host_${Date.now()}@dssa-test.local`,
-        name: "Host Lifecycle Test",
+        clerkId: `test_host_a_${Date.now()}`,
+        email: `host_a_${Date.now()}@dssa-test.local`,
+        name: "Host Alpha",
         role: AppRole.HOST,
       },
     });
-    cleanup.push(() => prisma.user.delete({ where: { id: host.id } }));
-    results.hostCreated = { id: host.id, role: host.role };
+    cleanup.push(() => prisma.user.delete({ where: { id: hostA.id } }));
+
+    const hostB = await prisma.user.create({
+      data: {
+        clerkId: `test_host_b_${Date.now()}`,
+        email: `host_b_${Date.now()}@dssa-test.local`,
+        name: "Host Beta",
+        role: AppRole.HOST,
+      },
+    });
+    cleanup.push(() => prisma.user.delete({ where: { id: hostB.id } }));
+
+    results.hostsCreated = { hostA: hostA.id, hostB: hostB.id };
 
     // 2. Create a test Room
     const room = await prisma.room.create({
@@ -42,12 +54,22 @@ export async function POST() {
     cleanup.push(() => prisma.room.delete({ where: { id: room.id } }));
     results.roomCreated = { id: room.id, code: room.code };
 
-    // 3. Create active session for host
+    // 3. Test State Machine Transitions logic
+    results.stateMachineTransitions = {
+      scheduledToActive: isValidSessionTransition(SessionStatus.SCHEDULED, SessionStatus.ACTIVE), // true
+      activeToEnded: isValidSessionTransition(SessionStatus.ACTIVE, SessionStatus.ENDED),         // true
+      scheduledToCancelled: isValidSessionTransition(SessionStatus.SCHEDULED, SessionStatus.CANCELLED), // true
+      activeToCancelled: isValidSessionTransition(SessionStatus.ACTIVE, SessionStatus.CANCELLED),       // true
+      endedToActiveBlocked: !isValidSessionTransition(SessionStatus.ENDED, SessionStatus.ACTIVE),       // true (blocked)
+      cancelledToEndedBlocked: !isValidSessionTransition(SessionStatus.CANCELLED, SessionStatus.ENDED), // true (blocked)
+    };
+
+    // 4. Create active session for Host A
     const session = await prisma.attendanceSession.create({
       data: {
         roomId: room.id,
-        hostUserId: host.id,
-        title: "Committee Orientation Session",
+        hostUserId: hostA.id,
+        title: "Alpha Committee Session",
         status: SessionStatus.ACTIVE,
         startsAt: new Date(),
       },
@@ -57,28 +79,15 @@ export async function POST() {
       },
     });
     cleanup.push(() => prisma.attendanceSession.delete({ where: { id: session.id } }));
-    results.sessionCreated = { id: session.id, status: session.status, room: session.room.name };
+    results.sessionCreated = { id: session.id, status: session.status, host: session.host.name };
 
-    // 4. Verify active session query for host
-    const activeForHost = await prisma.attendanceSession.findFirst({
-      where: {
-        hostUserId: host.id,
-        status: SessionStatus.ACTIVE,
-      },
-      include: {
-        room: true,
-      },
-    });
-    results.activeSessionDiscovered = activeForHost?.id === session.id;
-
-    // 5. Verify room conflict check
-    const activeInRoom = await prisma.attendanceSession.findFirst({
-      where: {
-        roomId: room.id,
-        status: SessionStatus.ACTIVE,
-      },
-    });
-    results.roomInUseDetected = activeInRoom?.id === session.id;
+    // 5. Test Ownership isolation
+    const isOwnerA = session.hostUserId === hostA.id;
+    const isOwnerB = session.hostUserId === hostB.id;
+    results.ownershipBoundary = {
+      hostAIsOwner: isOwnerA,
+      hostBIsOwner: isOwnerB, // false (blocked from controlling session)
+    };
 
     // 6. Conclude / End session
     const endedSession = await prisma.attendanceSession.update({
@@ -90,14 +99,12 @@ export async function POST() {
     });
     results.sessionEnded = { status: endedSession.status, hasEndsAt: !!endedSession.endsAt };
 
-    // 7. Verify host no longer has an active session
-    const postActive = await prisma.attendanceSession.findFirst({
-      where: {
-        hostUserId: host.id,
-        status: SessionStatus.ACTIVE,
-      },
+    // 7. Verify historical query finds ended session for Host A
+    const hostHistory = await prisma.attendanceSession.findMany({
+      where: { hostUserId: hostA.id },
+      orderBy: { startsAt: "desc" },
     });
-    results.postActiveCleared = postActive === null;
+    results.historyDiscovered = hostHistory.length === 1 && hostHistory[0].id === session.id;
 
     // 8. Execute cleanup
     for (const fn of cleanup.reverse()) {

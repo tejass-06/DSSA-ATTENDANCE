@@ -1,42 +1,78 @@
 import React from "react";
+import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { Calendar, Users, Clock } from "lucide-react";
+import { SessionStatus } from "@prisma/client";
+import { Calendar, Users, Clock, Filter } from "lucide-react";
 import { AdminBadge } from "@/components/admin/AdminBadge";
 import { AdminEmptyState } from "@/components/admin/AdminEmptyState";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Session Overview | DSSA Admin",
-  description: "View room attendance sessions and statuses",
+  title: "Session Operations Log | DSSA Admin",
+  description: "View and filter all room attendance sessions across the system",
 };
 
-export default async function AdminSessionsPage() {
-  const sessions = await prisma.attendanceSession.findMany({
-    orderBy: { startsAt: "desc" },
-    include: {
-      room: {
-        select: {
-          id: true,
-          name: true,
-          code: true,
+interface AdminSessionsPageProps {
+  searchParams: Promise<{ status?: string }>;
+}
+
+export default async function AdminSessionsPage({ searchParams }: AdminSessionsPageProps) {
+  const { status: rawStatus } = await searchParams;
+
+  // Validate status filter against Prisma SessionStatus enum
+  const validStatus =
+    rawStatus && Object.values(SessionStatus).includes(rawStatus as SessionStatus)
+      ? (rawStatus as SessionStatus)
+      : undefined;
+
+  const [sessions, statusCounts] = await Promise.all([
+    prisma.attendanceSession.findMany({
+      where: validStatus ? { status: validStatus } : undefined,
+      orderBy: { startsAt: "desc" },
+      include: {
+        room: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+          },
+        },
+        host: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+        _count: {
+          select: {
+            records: true,
+            qrChallenges: true,
+          },
         },
       },
-      host: {
-        select: {
-          id: true,
-          name: true,
-          email: true,
-        },
-      },
-      _count: {
-        select: {
-          records: true,
-          qrChallenges: true,
-        },
-      },
-    },
-  });
+    }),
+    prisma.attendanceSession.groupBy({
+      by: ["status"],
+      _count: { id: true },
+    }),
+  ]);
+
+  const countMap: Record<string, number> = {};
+  let totalCount = 0;
+  for (const item of statusCounts) {
+    countMap[item.status] = item._count.id;
+    totalCount += item._count.id;
+  }
+
+  const filterTabs = [
+    { label: "All Sessions", value: undefined, count: totalCount, href: "/admin/sessions" },
+    { label: "Active", value: "ACTIVE", count: countMap["ACTIVE"] || 0, href: "/admin/sessions?status=ACTIVE" },
+    { label: "Ended", value: "ENDED", count: countMap["ENDED"] || 0, href: "/admin/sessions?status=ENDED" },
+    { label: "Scheduled", value: "SCHEDULED", count: countMap["SCHEDULED"] || 0, href: "/admin/sessions?status=SCHEDULED" },
+    { label: "Cancelled", value: "CANCELLED", count: countMap["CANCELLED"] || 0, href: "/admin/sessions?status=CANCELLED" },
+  ];
 
   return (
     <div className="space-y-6">
@@ -51,21 +87,58 @@ export default async function AdminSessionsPage() {
             Attendance Sessions
           </h1>
           <p className="mt-1 text-xs sm:text-sm text-zinc-400">
-            Read-only operational log of all scheduled, active, and completed room sessions.
+            Real-time operational log and historical registry of all committee attendance sessions.
           </p>
         </div>
 
         <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-zinc-900/60 px-3.5 py-2 font-mono text-xs text-zinc-300 self-start sm:self-auto">
-          <span>Total Sessions:</span>
+          <span>Matching Sessions:</span>
           <span className="font-bold text-white text-sm">{sessions.length}</span>
         </div>
+      </div>
+
+      {/* Filter Tabs */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-white/[0.06] pb-3">
+        <div className="flex items-center gap-1.5 text-xs font-mono text-zinc-500 mr-2">
+          <Filter className="h-3.5 w-3.5" />
+          <span>Status Filter:</span>
+        </div>
+
+        {filterTabs.map((tab) => {
+          const isActive = validStatus === tab.value;
+
+          return (
+            <Link
+              key={tab.label}
+              href={tab.href}
+              className={`inline-flex items-center gap-2 rounded-xl px-3 py-1.5 text-xs font-mono transition-colors ${
+                isActive
+                  ? "border border-cyan-500/40 bg-cyan-950/40 text-cyan-300 font-semibold"
+                  : "border border-white/10 bg-zinc-900/40 text-zinc-400 hover:text-white hover:bg-zinc-800"
+              }`}
+            >
+              <span>{tab.label}</span>
+              <span
+                className={`rounded-md px-1.5 py-0.2 text-[10px] ${
+                  isActive ? "bg-cyan-500/20 text-cyan-200" : "bg-zinc-800 text-zinc-400"
+                }`}
+              >
+                {tab.count}
+              </span>
+            </Link>
+          );
+        })}
       </div>
 
       {/* Sessions Table */}
       {sessions.length === 0 ? (
         <AdminEmptyState
-          title="No attendance sessions have been created"
-          description="Sessions initiated by authorized hosts will appear in this operational log."
+          title={validStatus ? `No ${validStatus.toLowerCase()} sessions found` : "No attendance sessions have been created"}
+          description={
+            validStatus
+              ? `There are currently no attendance sessions matching the status ${validStatus}.`
+              : "Sessions initiated by authorized hosts will appear in this operational log."
+          }
           icon={<Calendar className="h-6 w-6 text-zinc-500" />}
         />
       ) : (
