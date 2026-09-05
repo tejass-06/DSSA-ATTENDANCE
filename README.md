@@ -9,8 +9,8 @@ Official, production-quality, mobile-first room attendance management system bui
 The DSSA Room Attendance System provides controlled, tamper-resistant digital attendance for DSSA meetings, workshops, and committee sessions.
 
 - **Host Mode (Admin/Host Phone):** The host uses their smartphone to select active venues, initiate room attendance sessions, display cryptographic rotating QR challenges, and monitor session telemetry.
-- **Member Attendance (Member Phone):** Committee members authenticate on their phones, scan dynamic QR challenges, grant room geolocation access, and mark verified attendance.
-- **Layered Anti-Proxy Security:** Combines Clerk authentication, dynamic rotating QR challenges, server-side room geofencing, database unique constraints, and audit logging to minimize proxy attendance.
+- **Member Attendance (Member Phone):** Committee members authenticate on their phones, scan dynamic QR challenges with their device camera, and submit cryptographic tokens for server-side verification.
+- **Layered Anti-Proxy Security:** Combines Clerk authentication, dynamic rotating QR challenges, database unique constraints `@@unique([sessionId, userId])`, server timestamps, and audit logging to minimize proxy attendance.
 
 ---
 
@@ -40,6 +40,25 @@ Located in `src/lib/auth/server.ts`:
 
 ---
 
+## 📷 Member QR Scanning & Attendance Submission (Phase 10)
+
+Located at `/attendance` and implemented in `src/lib/attendance/service.ts`, `src/app/attendance/actions.ts`, and `src/components/attendance/QRScanner.tsx`:
+
+- **Member Camera Scanner:** Built with pure JavaScript `jsQR` Canvas video processing, camera permission handling, rear/front camera switching, reticle laser animation, and instant stream cleanup.
+- **Authoritative Server Submission:**
+  - Validates authenticated Clerk identity & role (`MEMBER`, `HOST`, `ADMIN`, `SUPER_ADMIN`; `PENDING` rejected).
+  - Validates QR protocol version (`DSSA_ATT_V1`).
+  - Calls Phase 9 `validateQRChallenge(sessionId, rawToken)` to check SHA-256 hash in MySQL, active session status, and server time expiration.
+  - Generates server timestamp (`markedAt: new Date()`).
+  - Enforces database duplicate protection via `@@unique([sessionId, userId])` with graceful concurrency handling.
+  - Automatically records `AttendanceStatus.PRESENT` and creates immutable `AuditLog` entry.
+- **Zero-Trust Browser Architecture:** The browser is never trusted for user identity, timestamps, attendance status, session status, or expiration.
+
+> [!NOTE]
+> Geolocation capture and radius verification belong to **Phases 11–12**. Realtime streaming belongs to **Phase 15**.
+
+---
+
 ## ⚡ Rotating QR Challenge System (Phase 9)
 
 Located in `src/lib/qr/`:
@@ -49,9 +68,6 @@ Located in `src/lib/qr/`:
 - **Session Binding:** Every QR challenge is strictly bound to a single `ACTIVE` `AttendanceSession`. Challenges generated for Session A are rejected for Session B.
 - **Host Display:** High-contrast `QRCodeSVG` with animated countdown bar, live rotation status, and fullscreen room presentation mode.
 - **Centralized Server Validation:** `validateQRChallenge(sessionId, rawToken)` verifies challenge existence, session status (`ACTIVE`), session binding, and server timestamp expiry.
-
-> [!NOTE]
-> Member scanner UI and attendance submission belong to **Phase 10**. GPS geofencing belongs to **Phases 11–12**, and realtime streaming belongs to **Phase 15**.
 
 ---
 
@@ -90,7 +106,7 @@ The Administrative Control Center is located at `/admin` and strictly requires `
 - **Framework:** Next.js 16 (App Router + Turbopack)
 - **Authentication:** Clerk (`@clerk/nextjs`, `@clerk/themes`)
 - **Database & ORM:** MySQL + Prisma 6.19.3
-- **QR Generation:** `qrcode.react` (SVG)
+- **QR Generation & Decoding:** `qrcode.react` (SVG) + `jsqr` (Canvas decoder)
 - **Language:** TypeScript
 - **Styling:** Tailwind CSS v4 + Vanilla CSS Design Tokens
 - **Icons:** Lucide React
@@ -108,11 +124,11 @@ The Administrative Control Center is located at `/admin` and strictly requires `
 - [x] **Phase 6: Admin Dashboard Foundation**
 - [x] **Phase 7: Host Mode Foundation**
 - [x] **Phase 8: Attendance Session Management**
-- [x] **Phase 9: Rotating QR Attendance System** *(Completed)*
-- [ ] **Phase 10: Member QR Scanning + Attendance Submission** *(Next)*
-- [ ] **Phase 11: Geolocation Verification** *(Planned)*
+- [x] **Phase 9: Rotating QR Attendance System**
+- [x] **Phase 10: Member QR Scanning + Attendance Submission** *(Completed)*
+- [ ] **Phase 11: Geolocation Capture + Location Validation** *(Next)*
 - [ ] **Phase 12: Geofencing** *(Planned)*
-- [ ] **Phase 13: Duplicate Protection & Server Validation** *(Planned)*
+- [ ] **Phase 13: Duplicate Protection & Server Validation Hardening** *(Planned)*
 - [ ] **Phase 14: Anti-Proxy Hardening** *(Planned)*
 - [ ] **Phase 15: Live Attendance** *(Planned)*
 - [ ] **Phase 16: Attendance History** *(Planned)*
