@@ -241,10 +241,12 @@ export async function processAttendanceSubmission(
             status: AttendanceStatus.PRESENT,
             distanceMeters: Math.round(calculatedDistance),
             accuracyMeters: locationValidation.accuracyMeters,
+            geofenceStatus: locationValidation.geofence?.status || "INSIDE",
             serverMarkedAt: serverMarkedAt.toISOString(),
           }),
         },
       });
+
 
       return record;
     });

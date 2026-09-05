@@ -10,7 +10,7 @@ The DSSA Room Attendance System provides controlled, tamper-resistant digital at
 
 - **Host Mode (Admin/Host Phone):** The host uses their smartphone to select active venues, initiate room attendance sessions, display cryptographic rotating QR challenges, and monitor session telemetry.
 - **Member Attendance (Member Phone):** Committee members authenticate on their phones, scan dynamic QR challenges with their device camera, grant device geolocation access, and submit cryptographic tokens and coordinates for server-side verification.
-- **Layered Anti-Proxy Security:** Combines Clerk authentication, dynamic rotating QR challenges, server-side Haversine distance calculations against database room coordinates, database unique constraints `@@unique([sessionId, userId])`, server timestamps, and audit logging to minimize proxy attendance.
+- **Layered Anti-Proxy Security:** Combines Clerk authentication, dynamic rotating QR challenges, server-side room geofence enforcement against database room radius boundaries, database unique constraints `@@unique([sessionId, userId])`, server timestamps, and audit logging to minimize proxy attendance.
 
 ---
 
@@ -40,9 +40,26 @@ Located in `src/lib/auth/server.ts`:
 
 ---
 
+## 🌐 Room Geofencing & Boundary Enforcement (Phase 12)
+
+Located in `src/lib/geo/geofence.ts` and integrated into `src/lib/geo/service.ts`:
+
+- **Authoritative Database Source:** Geofence radius is derived exclusively from `Room.radiusMeters` in MySQL (`AttendanceSession -> Room`). Client-supplied radius values or room IDs are ignored.
+- **Radius Sanity Validation:** Enforces `MIN_ROOM_RADIUS_METERS = 5` and `MAX_ROOM_RADIUS_METERS = 500`. Invalid or missing radius values fail closed.
+- **Accuracy-Aware Boundary Policy:**
+  - **`INSIDE` (`distance + accuracy <= radius`):** Member is comfortably inside the geofence; attendance proceeds.
+  - **`OUTSIDE` (`distance - accuracy > radius`):** Member is outside the geofence; attendance is rejected (`LOCATION_OUTSIDE`).
+  - **`UNCERTAIN` (uncertainty overlaps boundary):** Conservative policy fails closed to eliminate false positives; member is prompted to retry from inside the room (`LOCATION_UNCERTAIN`).
+- **Fail Closed Guarantee:** Any inactive room, ended session, or unconfirmed boundary immediately aborts attendance creation.
+
+> [!NOTE]
+> Geofencing is one security layer in the defense-in-depth architecture. Browser GPS does not solely guarantee physical presence.
+
+---
+
 ## 📍 Geolocation Capture & Server Distance Validation (Phase 11)
 
-Located in `src/lib/geo/` and integrated into `/attendance`:
+Located in `src/lib/geo/`:
 
 - **Browser GPS Capture:** Point-in-time acquisition via `navigator.geolocation.getCurrentPosition` with `enableHighAccuracy: true` upon successful QR code detection.
 - **Server Coordinate & Accuracy Validation:**
@@ -50,11 +67,7 @@ Located in `src/lib/geo/` and integrated into `/attendance`:
   - Rejects NaN, Infinity, strings, and negative accuracy values.
   - Enforces maximum acceptable uncertainty threshold: `MAX_ACCEPTABLE_LOCATION_ACCURACY_METERS = 100`.
 - **Numerically Safe Haversine Utility (`src/lib/geo/distance.ts`):** Great-circle distance calculation between member coordinates and authoritative session venue coordinates resolved from MySQL (`AttendanceSession -> Room`).
-- **Zero-Trust Client Boundary:** Client-supplied distances, `insideRoom` flags, or room IDs are ignored. The server independently calculates the distance.
-- **Privacy Conscious Logging:** Raw personal coordinates are never permanently logged; only sanitized distance and accuracy metadata are included in `AuditLog`.
-
-> [!NOTE]
-> Geolocation is one security signal and does not solely guarantee physical presence. Configurable room boundary enforcement (geofencing policies) belongs to **Phase 12**. Realtime attendance streaming belongs to **Phase 15**.
+- **Privacy Conscious Logging:** Raw personal coordinates are never permanently logged; only sanitized distance, accuracy, and geofence status metadata are recorded in `AuditLog`.
 
 ---
 
@@ -122,7 +135,7 @@ The Administrative Control Center is located at `/admin` and strictly requires `
 - **Authentication:** Clerk (`@clerk/nextjs`, `@clerk/themes`)
 - **Database & ORM:** MySQL + Prisma 6.19.3
 - **QR Generation & Decoding:** `qrcode.react` (SVG) + `jsqr` (Canvas decoder)
-- **Geolocation Math:** Custom numerically-safe Haversine utility
+- **Geolocation & Geofencing:** Numerically-safe Haversine math & accuracy-aware boundary engine
 - **Language:** TypeScript
 - **Styling:** Tailwind CSS v4 + Vanilla CSS Design Tokens
 - **Icons:** Lucide React
@@ -142,9 +155,9 @@ The Administrative Control Center is located at `/admin` and strictly requires `
 - [x] **Phase 8: Attendance Session Management**
 - [x] **Phase 9: Rotating QR Attendance System**
 - [x] **Phase 10: Member QR Scanning + Attendance Submission**
-- [x] **Phase 11: Geolocation Capture + Location Validation** *(Completed)*
-- [ ] **Phase 12: Room Geofencing + Attendance Boundary Enforcement** *(Next)*
-- [ ] **Phase 13: Duplicate Protection & Server Validation Hardening** *(Planned)*
+- [x] **Phase 11: Geolocation Capture + Location Validation**
+- [x] **Phase 12: Room Geofencing + Attendance Boundary Enforcement** *(Completed)*
+- [ ] **Phase 13: Duplicate Protection + Server Validation Hardening** *(Next)*
 - [ ] **Phase 14: Anti-Proxy Hardening** *(Planned)*
 - [ ] **Phase 15: Live Attendance** *(Planned)*
 - [ ] **Phase 16: Attendance History** *(Planned)*

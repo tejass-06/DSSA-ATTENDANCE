@@ -1,7 +1,7 @@
 /**
  * DSSA Room Attendance System
  * Geolocation Configuration & Threshold Constants
- * Phase 11: Geolocation Capture + Location Validation
+ * Phase 11 & Phase 12: Room Geofencing & Boundary Constants
  */
 
 /**
@@ -14,3 +14,15 @@ export const MAX_ACCEPTABLE_LOCATION_ACCURACY_METERS = 100;
  * Earth radius constant in meters (WGS-84 mean radius)
  */
 export const EARTH_RADIUS_METERS = 6371000;
+
+/**
+ * Minimum valid room geofence radius in meters.
+ * Prevents impossible zero/negative radius room misconfigurations.
+ */
+export const MIN_ROOM_RADIUS_METERS = 5;
+
+/**
+ * Maximum valid room geofence radius in meters.
+ * Prevents excessively broad venue radius definitions.
+ */
+export const MAX_ROOM_RADIUS_METERS = 500;

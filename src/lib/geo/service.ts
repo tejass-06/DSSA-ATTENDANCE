@@ -1,12 +1,12 @@
 /**
  * DSSA Room Attendance System
- * Centralized Server-Side Geolocation Validation Service
- * Phase 11: Geolocation Capture + Location Validation
+ * Centralized Server-Side Geolocation & Geofence Validation Service
+ * Phase 11 & Phase 12: Room Geofencing + Boundary Enforcement
  */
 import { prisma } from "@/lib/db";
 import { SessionStatus } from "@prisma/client";
 import { calculateHaversineDistanceMeters } from "./distance";
-import { MAX_ACCEPTABLE_LOCATION_ACCURACY_METERS } from "./config";
+import { evaluateGeofence, type GeofenceEvaluationResult } from "./geofence";
 
 export interface ClientLocationInput {
   latitude: unknown;
@@ -21,6 +21,7 @@ export interface LocationValidationResult {
   accuracyMeters?: number;
   error?: string;
   errorCode?: string;
+  geofence?: GeofenceEvaluationResult;
   room?: {
     id: string;
     name: string;
@@ -32,8 +33,8 @@ export interface LocationValidationResult {
 }
 
 /**
- * Validates member coordinates, accuracy, and calculates Haversine distance from the session room.
- * The server independently resolves the room and performs all calculations.
+ * Validates member coordinates, GPS accuracy, and enforces room geofence boundaries.
+ * The server independently resolves the room from the active session and performs all calculations.
  */
 export async function validateMemberLocation(
   sessionId: string,
@@ -75,7 +76,7 @@ export async function validateMemberLocation(
   if (!session.room || !session.room.isActive) {
     return {
       valid: false,
-      error: "Associated committee room is inactive or not found.",
+      error: "The selected attendance room is currently unavailable.",
       errorCode: "ROOM_INACTIVE",
     };
   }
@@ -139,31 +140,39 @@ export async function validateMemberLocation(
       };
     }
     accuracyMeters = accVal;
-
-    if (accVal > MAX_ACCEPTABLE_LOCATION_ACCURACY_METERS) {
-      return {
-        valid: false,
-        error: `Location accuracy is too low (${Math.round(accVal)}m uncertainty). Please acquire a stronger GPS signal.`,
-        errorCode: "LOCATION_ACCURACY_TOO_LOW",
-      };
-    }
   }
 
-  // 7. Calculate authoritative Haversine distance against room coordinates
+  // 7. Calculate authoritative Haversine distance against database room coordinates
   const roomLat = Number(session.room.latitude);
   const roomLon = Number(session.room.longitude);
+  const roomRadius = Number(session.room.radiusMeters);
 
   const distanceMeters = calculateHaversineDistanceMeters(latVal, lonVal, roomLat, roomLon);
+
+  // 8. Phase 12 Geofence Boundary Enforcement
+  const geofenceResult = evaluateGeofence(distanceMeters, accuracyMeters, roomRadius);
+
+  if (!geofenceResult.allowed) {
+    return {
+      valid: false,
+      distanceMeters,
+      accuracyMeters,
+      geofence: geofenceResult,
+      error: geofenceResult.error || "Location is outside the permitted room boundary.",
+      errorCode: geofenceResult.errorCode || "LOCATION_OUTSIDE",
+    };
+  }
 
   return {
     valid: true,
     distanceMeters,
     accuracyMeters,
+    geofence: geofenceResult,
     room: {
       id: session.room.id,
       name: session.room.name,
       code: session.room.code,
-      radiusMeters: session.room.radiusMeters,
+      radiusMeters: roomRadius,
       latitude: roomLat,
       longitude: roomLon,
     },

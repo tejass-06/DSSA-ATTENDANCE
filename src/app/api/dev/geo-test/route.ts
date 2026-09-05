@@ -162,7 +162,7 @@ export async function GET() {
       passed: geoValSame.valid === true && geoValSame.distanceMeters === 0,
     });
 
-    // Test 6: Clearly distant coordinates (e.g. 50 km away)
+    // Test 6: Clearly distant coordinates (50+ km away) - Phase 12 geofence boundary rejection
     const distantLocation = {
       latitude: 21.5000000,
       longitude: 79.5000000,
@@ -172,10 +172,11 @@ export async function GET() {
     results.push({
       testNumber: 6,
       name: "Clearly distant coordinates (50+ km away)",
-      expected: "Valid=true, distance > 40,000 meters",
-      actual: `Valid=${geoValDistant.valid}, Distance=${Math.round(geoValDistant.distanceMeters ?? 0)}m`,
-      passed: geoValDistant.valid === true && (geoValDistant.distanceMeters ?? 0) > 40000,
+      expected: "Valid=false, ErrorCode=LOCATION_OUTSIDE",
+      actual: `Valid=${geoValDistant.valid}, ErrorCode=${geoValDistant.errorCode}, Distance=${Math.round(geoValDistant.distanceMeters ?? 0)}m`,
+      passed: geoValDistant.valid === false && geoValDistant.errorCode === "LOCATION_OUTSIDE" && (geoValDistant.distanceMeters ?? 0) > 40000,
     });
+
 
     // Test 7: Invalid latitude (out of bounds > 90)
     const invalidLatRes = await validateMemberLocation(activeSession.id, {
