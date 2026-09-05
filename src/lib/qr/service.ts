@@ -147,6 +147,15 @@ export async function validateQRChallenge(
     return { valid: false, error: "MALFORMED_REQUEST: Session ID and token are required." };
   }
 
+  // Security Hardening: Enforce reasonable limits and hex format for raw token
+  if (sessionId.length > 100 || rawToken.length > 256 || rawToken.length < 16) {
+    return { valid: false, error: "INVALID_CHALLENGE: Invalid challenge token structure." };
+  }
+
+  if (!/^[0-9a-fA-F]+$/.test(rawToken)) {
+    return { valid: false, error: "INVALID_CHALLENGE: Challenge token must be hexadecimal." };
+  }
+
   const challengeHash = hashToken(rawToken);
 
   // Query challenge and eager-load session, room, and host

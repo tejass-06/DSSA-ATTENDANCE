@@ -1,14 +1,16 @@
 /**
  * DSSA Room Attendance System
  * Centralized Attendance Submission Service
- * Phase 11: Geolocation Capture + Location Validation
+ * Phase 13: Duplicate Protection + Server Validation Hardening Pass
  */
 import { prisma } from "@/lib/db";
-import { AttendanceStatus, SessionStatus } from "@prisma/client";
+import { AttendanceStatus, SessionStatus, AppRole as PrismaAppRole } from "@prisma/client";
 import { validateQRChallenge } from "@/lib/qr/service";
 import { QR_PROTOCOL_PREFIX } from "@/lib/qr/config";
 import { appRoleToPrismaRole, hasMinimumRole, type AppRole } from "@/lib/auth/roles";
 import { validateMemberLocation, type ClientLocationInput } from "@/lib/geo/service";
+import { evaluateGeofence } from "@/lib/geo/geofence";
+import { calculateHaversineDistanceMeters } from "@/lib/geo/distance";
 import { Prisma } from "@prisma/client";
 
 export interface AttendanceSubmissionResult {
@@ -37,8 +39,8 @@ export interface UserContextParam {
 }
 
 /**
- * Validates and records member attendance with QR token verification and geolocation validation.
- * Server is the sole authority for identity, session validity, QR validity, location calculation, and timestamp.
+ * Validates and records member attendance with complete server-side security hardening.
+ * Server is the sole authority for identity, role, session validity, QR validity, location calculation, geofence boundary, and timestamp.
  */
 export async function processAttendanceSubmission(
   userContext: UserContextParam | null,
@@ -46,7 +48,7 @@ export async function processAttendanceSubmission(
   locationInput?: ClientLocationInput | unknown
 ): Promise<AttendanceSubmissionResult> {
   // 1. Authenticate member
-  if (!userContext || !userContext.userId) {
+  if (!userContext || !userContext.userId || typeof userContext.userId !== "string") {
     return {
       success: false,
       error: "Authentication required. Please sign in.",
@@ -63,12 +65,20 @@ export async function processAttendanceSubmission(
     };
   }
 
-  // 3. Parse QR payload safely
+  // 3. Parse QR payload safely with size limits
   if (!rawPayloadInput || (typeof rawPayloadInput !== "string" && typeof rawPayloadInput !== "object")) {
     return {
       success: false,
       error: "Invalid QR code format.",
       errorCode: "INVALID_QR",
+    };
+  }
+
+  if (typeof rawPayloadInput === "string" && rawPayloadInput.length > 4096) {
+    return {
+      success: false,
+      error: "QR payload exceeds maximum allowed size.",
+      errorCode: "MALFORMED_QR",
     };
   }
 
@@ -107,10 +117,19 @@ export async function processAttendanceSubmission(
   const sid = typeof parsed.sid === "string" ? parsed.sid.trim() : "";
   const token = typeof parsed.token === "string" ? parsed.token.trim() : "";
 
-  if (!sid || !token) {
+  // Token & session structure hardening
+  if (!sid || sid.length > 100 || !token || token.length > 256 || token.length < 16) {
     return {
       success: false,
-      error: "Incomplete QR code payload.",
+      error: "Incomplete or malformed QR code payload.",
+      errorCode: "INVALID_PAYLOAD",
+    };
+  }
+
+  if (!/^[0-9a-fA-F]+$/.test(token)) {
+    return {
+      success: false,
+      error: "Invalid cryptographic challenge token format.",
       errorCode: "INVALID_PAYLOAD",
     };
   }
@@ -139,36 +158,55 @@ export async function processAttendanceSubmission(
 
   const session = qrValidation.session;
 
-  // 6. Geolocation Validation (Phase 11 service)
+  // 6. Geolocation & Geofence Validation (Phase 11 & Phase 12 service)
   const locationValidation = await validateMemberLocation(session.id, locationInput);
   if (!locationValidation.valid) {
     return {
       success: false,
       error: locationValidation.error || "Location verification failed.",
-      errorCode: locationValidation.errorCode || "LOCATION_VALIDATION_FAILED",
+      errorCode: locationValidation.errorCode || "LOCATION_OUTSIDE",
     };
   }
 
   const calculatedDistance = locationValidation.distanceMeters ?? 0;
 
-  // 7. Ensure MySQL User record is synchronized
-  const prismaRole = appRoleToPrismaRole(userContext.role);
-  const dbUser = await prisma.user.upsert({
+  // 7. Ensure MySQL User record exists & verify MySQL DB role authority
+  let dbUser = await prisma.user.findUnique({
     where: { clerkId: userContext.userId },
-    update: {
-      email: userContext.email,
-      name: userContext.name,
-      role: prismaRole,
-    },
-    create: {
-      clerkId: userContext.userId,
-      email: userContext.email,
-      name: userContext.name,
-      role: prismaRole,
-    },
   });
 
-  // 8. Check for existing attendance record
+  if (!dbUser) {
+    const prismaRole = appRoleToPrismaRole(userContext.role);
+    dbUser = await prisma.user.create({
+      data: {
+        clerkId: userContext.userId,
+        email: userContext.email,
+        name: userContext.name,
+        role: prismaRole,
+      },
+    });
+  } else {
+    // Synchronize latest profile details without overwriting DB role authority
+    dbUser = await prisma.user.update({
+      where: { id: dbUser.id },
+      data: {
+        email: userContext.email,
+        name: userContext.name,
+      },
+    });
+  }
+
+  // DB Role verification: fail-closed if DB role is PENDING
+  if (dbUser.role === PrismaAppRole.PENDING) {
+    return {
+      success: false,
+      error: "Your account is pending verification and cannot mark attendance.",
+      errorCode: "UNAUTHORIZED_ROLE",
+    };
+  }
+
+
+  // 8. Early check for existing attendance record (Fast UX path)
   const existingRecord = await prisma.attendanceRecord.findUnique({
     where: {
       sessionId_userId: {
@@ -204,22 +242,53 @@ export async function processAttendanceSubmission(
     };
   }
 
-  // 9. Atomically create AttendanceRecord (handles concurrent race conditions gracefully)
+  // 9. Atomic Attendance Creation within Transaction with Comprehensive Race Checks
   const serverMarkedAt = new Date();
 
   try {
     const newRecord = await prisma.$transaction(async (tx) => {
-      // Re-verify session is still active inside transaction
+      // 9a. Re-verify session state within transaction
       const currentSession = await tx.attendanceSession.findUnique({
         where: { id: session.id },
-        select: { status: true },
+        include: { room: true },
       });
 
       if (!currentSession || currentSession.status !== SessionStatus.ACTIVE) {
         throw new Error("SESSION_ENDED_DURING_SUBMISSION");
       }
 
-      // Create attendance record
+      // 9b. Re-verify room active state
+      if (!currentSession.room || !currentSession.room.isActive) {
+        throw new Error("ROOM_DEACTIVATED_DURING_SUBMISSION");
+      }
+
+      // 9c. Re-verify user role in database
+      const txUser = await tx.user.findUnique({
+        where: { id: dbUser.id },
+        select: { role: true },
+      });
+
+      if (!txUser || txUser.role === PrismaAppRole.PENDING) {
+        throw new Error("ROLE_REVOKED_DURING_SUBMISSION");
+      }
+
+      // 9d. Re-verify current geofence boundary against database room
+      const rawCoords = locationInput as Record<string, unknown>;
+      const lat = Number(rawCoords.latitude);
+      const lon = Number(rawCoords.longitude);
+      const acc = rawCoords.accuracy !== undefined ? Number(rawCoords.accuracy) : undefined;
+      const roomLat = Number(currentSession.room.latitude);
+      const roomLon = Number(currentSession.room.longitude);
+      const roomRadius = Number(currentSession.room.radiusMeters);
+
+      const txDist = calculateHaversineDistanceMeters(lat, lon, roomLat, roomLon);
+      const txGeofence = evaluateGeofence(txDist, acc, roomRadius);
+
+      if (!txGeofence.allowed) {
+        throw new Error(`GEOFENCE_FAILED:${txGeofence.errorCode || "LOCATION_OUTSIDE"}`);
+      }
+
+      // 9e. Create attendance record
       const record = await tx.attendanceRecord.create({
         data: {
           sessionId: session.id,
@@ -229,7 +298,7 @@ export async function processAttendanceSubmission(
         },
       });
 
-      // Create audit log entry with safe distance metadata (no raw personal coordinates)
+      // 9f. Create audit log entry with safe metadata (zero raw coordinates or tokens)
       await tx.auditLog.create({
         data: {
           actorUserId: dbUser.id,
@@ -239,44 +308,71 @@ export async function processAttendanceSubmission(
           metadata: JSON.stringify({
             sessionId: session.id,
             status: AttendanceStatus.PRESENT,
-            distanceMeters: Math.round(calculatedDistance),
-            accuracyMeters: locationValidation.accuracyMeters,
-            geofenceStatus: locationValidation.geofence?.status || "INSIDE",
+            distanceMeters: Math.round(txDist),
+            accuracyMeters: acc,
+            geofenceStatus: txGeofence.status,
             serverMarkedAt: serverMarkedAt.toISOString(),
           }),
         },
       });
 
-
-      return record;
+      return { record, sessionTitle: currentSession.title, roomName: currentSession.room.name, roomCode: currentSession.room.code, dist: txDist };
     });
 
     return {
       success: true,
       alreadyMarked: false,
       record: {
-        id: newRecord.id,
+        id: newRecord.record.id,
         sessionId: session.id,
-        sessionTitle: session.title,
-        roomName: session.room.name,
-        roomCode: session.room.code,
+        sessionTitle: newRecord.sessionTitle,
+        roomName: newRecord.roomName,
+        roomCode: newRecord.roomCode,
         markedAt: serverMarkedAt.toISOString(),
         status: AttendanceStatus.PRESENT,
         attendeeName: userContext.name,
-        distanceMeters: Math.round(calculatedDistance),
+        distanceMeters: Math.round(newRecord.dist),
       },
     };
   } catch (err) {
-    // Check if session ended during submission
+    // Session state race
     if (err instanceof Error && err.message === "SESSION_ENDED_DURING_SUBMISSION") {
       return {
         success: false,
-        error: "This attendance session has just ended.",
+        error: "This attendance session is no longer active.",
         errorCode: "SESSION_INACTIVE",
       };
     }
 
-    // Check if duplicate race condition triggered MySQL @@unique([sessionId, userId])
+    // Room deactivation race
+    if (err instanceof Error && err.message === "ROOM_DEACTIVATED_DURING_SUBMISSION") {
+      return {
+        success: false,
+        error: "The attendance venue is currently unavailable.",
+        errorCode: "ROOM_INACTIVE",
+      };
+    }
+
+    // Role change race
+    if (err instanceof Error && err.message === "ROLE_REVOKED_DURING_SUBMISSION") {
+      return {
+        success: false,
+        error: "Your account is not authorized to mark attendance.",
+        errorCode: "UNAUTHORIZED_ROLE",
+      };
+    }
+
+    // Geofence race
+    if (err instanceof Error && err.message.startsWith("GEOFENCE_FAILED:")) {
+      const geoCode = err.message.split(":")[1];
+      return {
+        success: false,
+        error: "Location is outside the permitted room boundary.",
+        errorCode: geoCode || "LOCATION_OUTSIDE",
+      };
+    }
+
+    // Handle concurrent duplicate race condition on MySQL @@unique([sessionId, userId])
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       const duplicateRecord = await prisma.attendanceRecord.findUnique({
         where: {
@@ -310,7 +406,7 @@ export async function processAttendanceSubmission(
       }
     }
 
-    // Unhandled error - return safe generic failure, never expose DB details
+    // Fallback safe failure without exposing stack trace or DB internals
     return {
       success: false,
       error: "Unable to record attendance. Please try again.",

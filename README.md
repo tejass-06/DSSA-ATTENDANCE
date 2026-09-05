@@ -38,6 +38,33 @@ Located in `src/lib/auth/server.ts`:
 - `requireRole(minimumRole)`: Verifies role hierarchy server-side; redirects unauthorized users to `/unauthorized`.
 - `requireAnyRole([roles])`: Enforces exact role whitelist server-side.
 
+## 🛡️ Duplicate Protection & Server Validation Hardening (Phase 13)
+
+Located in `src/lib/attendance/service.ts`, `src/lib/qr/service.ts`, and `src/app/api/attendance/submit/route.ts`:
+
+- **Strict Source of Truth Boundaries:**
+  - **Identity:** Authenticated Clerk user session (`auth()`).
+  - **Application Authorization:** MySQL `User.role` is the definitive application role authority. Role modifications by administrators directly in the database cannot be overridden by client metadata or Clerk sign-in synchronizations.
+  - **Session & Room Authority:** Derived exclusively from database relations (`QRChallenge -> AttendanceSession -> Room`). Client-submitted `userId`, `roomId`, `distance`, `isInside`, or `radiusMeters` are strictly discarded.
+- **Payload & Token Structure Hardening:**
+  - Maximum raw JSON payload limit: $\le 4096$ characters.
+  - Token length limit: $16 \le \text{length} \le 256$ characters, strictly hexadecimal `^[0-9a-fA-F]+$`.
+  - Session ID length limit: $1 \le \text{length} \le 100$ characters.
+  - Strict protocol check (`DSSA_ATT_V1`).
+- **Atomic Database Transaction & Concurrency Defense:**
+  - Database transactions (`prisma.$transaction`) are deferred until client GPS coordinates are acquired.
+  - Immediately prior to database write, the transaction re-validates:
+    1. Session is still `ACTIVE` (guards against session-end races).
+    2. Room is still `isActive === true` (guards against venue-deactivation races).
+    3. User role is still authorized (guards against role-revocation races).
+    4. Member coordinates still satisfy latest room radius boundary.
+  - Final defense is the database unique constraint: `@@unique([sessionId, userId])`.
+  - Concurrent submissions (e.g. 10 rapid clicks, multi-tab scans) are cleanly captured via Prisma `P2002` error handling and mapped to a safe `ALREADY_MARKED` response.
+- **Information Leakage Prevention & Privacy-Conscious Auditing:**
+  - Raw cryptographic tokens, hashes, and personal GPS coordinates are never leaked in API responses, logs, or error payloads.
+  - Unified safe error responses (`UNAUTHORIZED`, `INVALID_QR`, `QR_EXPIRED`, `SESSION_NOT_ACTIVE`, `ROOM_UNAVAILABLE`, `LOCATION_INVALID`, `LOCATION_UNCERTAIN`, `LOCATION_OUTSIDE`, `ALREADY_MARKED`, `ATTENDANCE_FAILED`).
+  - Security endpoints enforce `Cache-Control: no-store`.
+
 ---
 
 ## 🌐 Room Geofencing & Boundary Enforcement (Phase 12)
@@ -156,9 +183,9 @@ The Administrative Control Center is located at `/admin` and strictly requires `
 - [x] **Phase 9: Rotating QR Attendance System**
 - [x] **Phase 10: Member QR Scanning + Attendance Submission**
 - [x] **Phase 11: Geolocation Capture + Location Validation**
-- [x] **Phase 12: Room Geofencing + Attendance Boundary Enforcement** *(Completed)*
-- [ ] **Phase 13: Duplicate Protection + Server Validation Hardening** *(Next)*
-- [ ] **Phase 14: Anti-Proxy Hardening** *(Planned)*
+- [x] **Phase 12: Room Geofencing + Attendance Boundary Enforcement**
+- [x] **Phase 13: Duplicate Protection + Server Validation Hardening** *(Completed)*
+- [ ] **Phase 14: Anti-Proxy Hardening** *(Next)*
 - [ ] **Phase 15: Live Attendance** *(Planned)*
 - [ ] **Phase 16: Attendance History** *(Planned)*
 - [ ] **Phase 17: CSV Export** *(Planned)*

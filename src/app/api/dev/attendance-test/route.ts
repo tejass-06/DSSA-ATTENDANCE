@@ -260,7 +260,7 @@ export async function GET() {
     // Generate expired payload pointing to expired challenge token
     // We compute the raw token whose sha256 matches expired_hash
     const crypto = await import("crypto");
-    const expiredRawToken = "expired_raw_token_" + Date.now();
+    const expiredRawToken = crypto.randomBytes(32).toString("hex");
     const expiredHash = crypto.createHash("sha256").update(expiredRawToken).digest("hex");
     await prisma.qRChallenge.update({
       where: { id: expiredChallenge.id },
@@ -357,7 +357,7 @@ export async function GET() {
     cleanup.push(() => prisma.attendanceSession.delete({ where: { id: endedSession.id } }));
 
     // Create challenge for ended session directly in DB
-    const endedRawToken = "ended_session_raw_token_" + Date.now();
+    const endedRawToken = crypto.randomBytes(32).toString("hex");
     const endedHash = crypto.createHash("sha256").update(endedRawToken).digest("hex");
     await prisma.qRChallenge.create({
       data: {
@@ -367,6 +367,7 @@ export async function GET() {
         expiresAt: new Date(Date.now() + 30000),
       },
     });
+
 
     const endedPayload = JSON.stringify({
       v: "DSSA_ATT_V1",
