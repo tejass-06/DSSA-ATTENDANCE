@@ -1,3 +1,8 @@
+/**
+ * DSSA Room Attendance System — Route Protection (proxy.ts)
+ * Next.js 16: middleware.ts renamed to proxy.ts
+ * Clerk authentication protects dashboard, admin, host, attendance routes.
+ */
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 
 const isProtectedRoute = createRouteMatcher([

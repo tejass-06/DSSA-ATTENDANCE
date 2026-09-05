@@ -17,7 +17,7 @@ The DSSA Room Attendance System provides controlled, tamper-resistant digital at
 ## 🔐 Authentication & Authorization Architecture
 
 ### 1. Authentication (Clerk)
-User identity and session security are managed via **Clerk** (`@clerk/nextjs` App Router integration).
+User identity and session security are managed via **Clerk** (`@clerk/nextjs` App Router integration with Next.js 16 `proxy.ts`).
 - **Public Routes:** `/`, `/sign-in`, `/sign-up`, `/unauthorized`
 - **Protected Base Routes:** `/dashboard`, `/admin`, `/host`, `/attendance`
 
@@ -32,22 +32,7 @@ The application enforces strict server-side authorization boundaries. A logged-i
 | **`MEMBER`** | 10 | Active committee member. Scanning rotating QR challenges and viewing individual attendance records. |
 | **`PENDING`** | 0 | **Default for new accounts.** Awaiting administrator verification and role assignment. |
 
-### 3. Role Storage Strategy & Testing
-During Phase 3, roles are stored securely in Clerk user `publicMetadata` (`{ "role": "ADMIN" }`).
-- **Server-Controlled:** Client code cannot self-assign or escalate roles.
-- **Development / Test Role Assignment:**
-  1. Open the [Clerk Dashboard](https://dashboard.clerk.com).
-  2. Navigate to **Users** &rarr; Select User.
-  3. Under **Public Metadata**, set:
-     ```json
-     {
-       "role": "ADMIN"
-     }
-     ```
-     *(Accepted values: `SUPER_ADMIN`, `ADMIN`, `HOST`, `MEMBER`, `PENDING`)*
-  4. Save changes. On next page refresh, server components immediately enforce the updated permissions.
-
-### 4. Server-Side Enforcement Helpers
+### 3. Server-Side Enforcement Helpers
 Located in `src/lib/auth/server.ts`:
 - `getCurrentUserWithRole()`: Safely retrieves user context and derives application role from server session.
 - `requireRole(minimumRole)`: Verifies role hierarchy server-side; redirects unauthorized users to `/unauthorized`.
@@ -55,12 +40,35 @@ Located in `src/lib/auth/server.ts`:
 
 ---
 
+## 📊 Admin Dashboard Foundation (Phase 6)
+
+The Administrative Control Center is located at `/admin` and strictly requires `ADMIN` or `SUPER_ADMIN` authorization.
+
+### Access Control
+- **Authorized:** `ADMIN`, `SUPER_ADMIN`
+- **Blocked Server-Side:** `PENDING`, `MEMBER`, `HOST`, unauthenticated users (redirected to `/unauthorized` or `/sign-in`).
+
+### Dashboard Sections
+1. **Overview (`/admin`):** Real-time database aggregations (Total Users, Active Members, Authorized Hosts, Active Rooms, Active Sessions, Total Attendance Check-ins, and Recent Activity).
+2. **Members (`/admin/members`):** Read-only directory of authenticated users with `MEMBER` role and attendance record counts.
+3. **Hosts (`/admin/hosts`):** Read-only registry of authorized session hosts and hosted session counts.
+4. **Rooms (`/admin/rooms`):** Real physical room entries with GPS coordinates, geofence radius, and session counts.
+5. **Sessions (`/admin/sessions`):** Real operational overview of scheduled, active, and completed attendance sessions with host and room relations.
+6. **Attendance (`/admin/attendance`):** Verified check-in records ledger with member names, session details, and marked timestamps.
+7. **Audit Logs (`/admin/audit-logs`):** Immutable security and operational event logs.
+
+> [!NOTE]
+> All statistics, tables, and lists are server-rendered Server Components directly querying MySQL via Prisma. Empty states are displayed when no data exists. Mutation controls (room creation, role editing, session starts, QR generation) are scheduled for subsequent phases.
+
+---
+
 ## 🛠️ Technology Stack
 
-- **Framework:** Next.js 16 (App Router)
+- **Framework:** Next.js 16 (App Router + Turbopack)
 - **Authentication:** Clerk (`@clerk/nextjs`, `@clerk/themes`)
+- **Database & ORM:** MySQL + Prisma 6.19.3
 - **Language:** TypeScript
-- **Styling:** Tailwind CSS + Vanilla CSS Tokens
+- **Styling:** Tailwind CSS v4 + Vanilla CSS Design Tokens
 - **Icons:** Lucide React
 - **Design Reference:** [https://dssa.scetngp.com/](https://dssa.scetngp.com/)
 
@@ -70,11 +78,11 @@ Located in `src/lib/auth/server.ts`:
 
 - [x] **Phase 1: Project Setup & DSSA Design Foundation**
 - [x] **Phase 2: Clerk Authentication**
-- [x] **Phase 3: User Roles & Authorization** *(Completed)*
-- [ ] **Phase 4: Prisma + MySQL Setup** *(Next)*
-- [ ] **Phase 5: Database Models & Relationships** *(Planned)*
-- [ ] **Phase 6: Admin Dashboard** *(Planned)*
-- [ ] **Phase 7: Host Mode** *(Planned)*
+- [x] **Phase 3: User Roles & Authorization**
+- [x] **Phase 4: Prisma + MySQL Database Foundation**
+- [x] **Phase 5: Database Models & Relationships**
+- [x] **Phase 6: Admin Dashboard Foundation** *(Completed)*
+- [ ] **Phase 7: Host Mode Foundation** *(Next)*
 - [ ] **Phase 8: Attendance Session Management** *(Planned)*
 - [ ] **Phase 9: Rotating QR System** *(Planned)*
 - [ ] **Phase 10: Member Attendance Flow** *(Planned)*

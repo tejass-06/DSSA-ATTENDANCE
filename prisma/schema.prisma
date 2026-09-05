@@ -1,0 +1,217 @@
+// DSSA Room Attendance System — Prisma Schema
+// Phase 5: Full Database Models & Relationships
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────────
+
+/// Application roles — must stay in sync with src/lib/auth/roles.ts AppRole type.
+/// Clerk publicMetadata remains authoritative for role assignment.
+/// MySQL mirrors the role via /api/user/sync on every sign-in.
+enum AppRole {
+  SUPER_ADMIN
+  ADMIN
+  HOST
+  MEMBER
+  PENDING
+}
+
+/// Lifecycle status of an attendance session.
+enum SessionStatus {
+  SCHEDULED
+  ACTIVE
+  ENDED
+  CANCELLED
+}
+
+/// Outcome status of a single attendance record.
+enum AttendanceStatus {
+  PRESENT
+  REJECTED
+  REVOKED
+}
+
+// ─────────────────────────────────────────────────
+// USER
+//
+// Mirrors the Clerk identity. Created/updated on every
+// sign-in via POST /api/user/sync.
+//
+// Role source-of-truth: Clerk publicMetadata (server-side).
+// MySQL User.role is a mirror — kept in sync by /api/user/sync.
+// Direct DB role writes are never trusted from client input.
+//
+// Passwords and Clerk session tokens are NEVER stored here.
+// ─────────────────────────────────────────────────
+model User {
+  id        String   @id @default(cuid())
+  clerkId   String   @unique // Clerk user_XXXX — external identity key
+  email     String   @unique // primary email from Clerk (may change)
+  name      String? // display name — nullable; Clerk profile may be incomplete
+  role      AppRole  @default(PENDING) // mirrors Clerk publicMetadata.role
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Back-relations
+  hostedSessions    AttendanceSession[] @relation("HostedSessions")
+  attendanceRecords AttendanceRecord[]  @relation("AttendanceRecords")
+  auditLogs         AuditLog[]          @relation("AuditLogs")
+
+  @@index([clerkId])
+  @@index([role])
+  @@map("users")
+}
+
+// ─────────────────────────────────────────────────
+// ROOM
+//
+// Represents a physical attendance location.
+// Rooms are never hard-deleted — use isActive = false
+// to disable a room that still has historical sessions.
+// ─────────────────────────────────────────────────
+model Room {
+  id           String   @id @default(cuid())
+  name         String // e.g. "DSSA Committee Room"
+  code         String   @unique // e.g. "DSSA-ROOM-01"
+  latitude     Decimal  @db.Decimal(10, 7) // ±180° with ~1cm precision; portable to PostgreSQL
+  longitude    Decimal  @db.Decimal(10, 7)
+  radiusMeters Int      @default(30) // geofence radius — not hard-coded in logic
+  isActive     Boolean  @default(true) // soft-disable; never delete rooms with history
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sessions AttendanceSession[]
+
+  @@index([code])
+  @@index([isActive])
+  @@map("rooms")
+}
+
+// ─────────────────────────────────────────────────
+// ATTENDANCE SESSION
+//
+// One attendance event (meeting/workshop/etc.) held in a Room.
+// Sessions are never deleted — they are ENDED or CANCELLED.
+// Historical sessions remain available for reporting.
+// ─────────────────────────────────────────────────
+model AttendanceSession {
+  id         String        @id @default(cuid())
+  roomId     String
+  hostUserId String
+  title      String // human-readable session name
+  status     SessionStatus @default(SCHEDULED)
+  startsAt   DateTime
+  endsAt     DateTime? // null = not yet ended
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  // Relations — explicit names required: User has two relations to AttendanceSession
+  room         Room               @relation(fields: [roomId], references: [id])
+  host         User               @relation("HostedSessions", fields: [hostUserId], references: [id])
+  records      AttendanceRecord[]
+  qrChallenges QRChallenge[]
+
+  @@index([roomId])
+  @@index([hostUserId])
+  @@index([status])
+  @@index([startsAt])
+  @@map("attendance_sessions")
+}
+
+// ─────────────────────────────────────────────────
+// ATTENDANCE RECORD
+//
+// One member's attendance for one session.
+//
+// DATABASE-ENFORCED DUPLICATE PROTECTION:
+//   @@unique([sessionId, userId]) prevents any member from
+//   marking attendance twice for the same session.
+//   This constraint is enforced by MySQL, NOT only by app logic.
+// ─────────────────────────────────────────────────
+model AttendanceRecord {
+  id        String           @id @default(cuid())
+  sessionId String
+  userId    String
+  markedAt  DateTime         @default(now()) // server time — never trust client time
+  status    AttendanceStatus @default(PRESENT)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  session AttendanceSession @relation(fields: [sessionId], references: [id])
+  user    User              @relation("AttendanceRecords", fields: [userId], references: [id])
+
+  @@unique([sessionId, userId]) // ← database-enforced: one record per (session, member)
+  @@index([sessionId])
+  @@index([userId])
+  @@map("attendance_records")
+}
+
+// ─────────────────────────────────────────────────
+// QR CHALLENGE
+//
+// Represents one rotating QR attendance challenge token.
+// Short-lived by design — expiresAt enforces TTL.
+//
+// SECURITY:
+//   - challengeHash stores a SHA-256 hash of the nonce, not the raw secret.
+//   - usedAt enables replay detection: a challenge used once is permanently consumed.
+//   - Each challenge is bound to exactly one session.
+//   - Raw QR secrets are NEVER stored here.
+//
+// QR generation and validation logic is implemented in a later phase.
+// ─────────────────────────────────────────────────
+model QRChallenge {
+  id            String    @id @default(cuid())
+  sessionId     String
+  challengeHash String    @unique // SHA-256 of nonce; unique for replay protection
+  issuedAt      DateTime  @default(now())
+  expiresAt     DateTime // short-lived; past this timestamp the challenge is dead
+  usedAt        DateTime? // null = not yet consumed; set on first valid use
+  createdAt     DateTime  @default(now())
+
+  session AttendanceSession @relation(fields: [sessionId], references: [id])
+
+  @@index([sessionId])
+  @@index([expiresAt]) // queried when purging expired challenges
+  @@map("qr_challenges")
+}
+
+// ─────────────────────────────────────────────────
+// AUDIT LOG
+//
+// Immutable record of security-sensitive actions.
+// actorUserId is nullable — actor account may be deleted
+// but the log entry must survive.
+//
+// metadata is stored as a JSON string (String @db.Text) rather
+// than Prisma's Json type, to avoid MySQL-specific JSON engine
+// behaviour and keep PostgreSQL migration straightforward.
+//
+// Audit log rows are NEVER deleted.
+// ─────────────────────────────────────────────────
+model AuditLog {
+  id          String   @id @default(cuid())
+  actorUserId String? // nullable — actor may have been deleted
+  action      String // e.g. "USER_ROLE_CHANGED", "SESSION_CREATED"
+  entityType  String // e.g. "User", "Room", "AttendanceSession"
+  entityId    String // internal DB id of the affected entity
+  metadata    String?  @db.Text // JSON string — portable, no MySQL JSON dependency
+  createdAt   DateTime @default(now())
+
+  actor User? @relation("AuditLogs", fields: [actorUserId], references: [id])
+
+  @@index([actorUserId])
+  @@index([entityType])
+  @@index([entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

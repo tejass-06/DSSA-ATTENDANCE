@@ -1,7 +1,9 @@
 /**
  * DSSA Room Attendance System - Canonical Role & Authorization Definitions
  * Phase 3: User Roles & Server-Side Authorization
+ * Phase 5: Added Prisma enum bridge helpers
  */
+import type { AppRole as PrismaAppRole } from "@prisma/client";
 
 export type AppRole = "SUPER_ADMIN" | "ADMIN" | "HOST" | "MEMBER" | "PENDING";
 
@@ -106,4 +108,27 @@ export function hasMinimumRole(userRole: AppRole, requiredRole: AppRole): boolea
  */
 export function hasAnyRole(userRole: AppRole, allowedRoles: AppRole[]): boolean {
   return allowedRoles.includes(userRole);
+}
+
+// ─────────────────────────────────────────────────
+// PRISMA BRIDGE HELPERS (Phase 5)
+//
+// Keep the TypeScript AppRole string union and the Prisma
+// AppRole enum in sync without duplicating logic.
+// ─────────────────────────────────────────────────
+
+/**
+ * Converts a Prisma AppRole enum value to the TypeScript AppRole string type.
+ * Use when reading a role from the database for authorization checks.
+ */
+export function prismaRoleToAppRole(prismaRole: PrismaAppRole): AppRole {
+  return prismaRole as unknown as AppRole;
+}
+
+/**
+ * Converts a TypeScript AppRole string to a Prisma AppRole enum value.
+ * Use when writing a role to the database.
+ */
+export function appRoleToPrismaRole(appRole: AppRole): PrismaAppRole {
+  return appRole as unknown as PrismaAppRole;
 }
