@@ -38,16 +38,16 @@ export async function GET() {
     // ─────────────────────────────────────────────────────────────
     // 1. QR TTL & CONFIGURATION AUDIT
     // ─────────────────────────────────────────────────────────────
-    const isTTL10s = QR_CHALLENGE_TTL_MS === 10_000;
-    const isGrace2s = QR_GRACE_PERIOD_MS === 2_000;
-    const isRotation10s = QR_ROTATION_INTERVAL_MS === 10_000;
+    const isTTL15s = QR_CHALLENGE_TTL_MS === 15_000;
+    const isGrace25s = QR_GRACE_PERIOD_MS === 25_000;
+    const isRotation15s = QR_ROTATION_INTERVAL_MS === 15_000;
     const effectiveWindow = QR_CHALLENGE_TTL_MS + QR_GRACE_PERIOD_MS;
 
     results.push({
       testNumber: 1,
       category: "QR Configuration & TTL",
       name: "Centralized QR TTL & Grace Policy",
-      passed: isTTL10s && isGrace2s && isRotation10s && effectiveWindow === 12_000,
+      passed: isTTL15s && isGrace25s && isRotation15s && effectiveWindow === 40_000,
       details: `Base TTL: ${QR_CHALLENGE_TTL_MS}ms, Grace: ${QR_GRACE_PERIOD_MS}ms, Effective Validity Window: ${effectiveWindow}ms`,
     });
 
