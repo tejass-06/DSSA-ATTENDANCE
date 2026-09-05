@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { Shield, Sparkles, LayoutDashboard, LogIn } from "lucide-react";
-import { auth } from "@clerk/nextjs/server";
+import { Shield, Sparkles, LayoutDashboard, LogIn, QrCode, Smartphone, Settings } from "lucide-react";
+import { getCurrentUserWithRole } from "@/lib/auth/server";
+import { hasMinimumRole, ROLE_METADATA_CONFIG } from "@/lib/auth/roles";
 import { UserButton } from "@clerk/nextjs";
 
 export async function Navbar() {
-  const { userId } = await auth();
+  const user = await getCurrentUserWithRole();
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-white/[0.08] bg-[#030712]/80 backdrop-blur-md">
@@ -26,27 +27,63 @@ export async function Navbar() {
         </Link>
 
         {/* Navigation & Auth Actions */}
-        <div className="flex items-center gap-3 sm:gap-4">
+        <div className="flex items-center gap-2 sm:gap-3">
           <a
             href="https://dssa.scetngp.com/"
             target="_blank"
             rel="noopener noreferrer"
-            className="hidden md:flex items-center gap-1.5 rounded-lg border border-white/10 bg-zinc-900/50 hover:bg-zinc-800/80 px-3 py-1.5 text-xs text-zinc-300 transition-colors"
+            className="hidden lg:flex items-center gap-1.5 rounded-lg border border-white/10 bg-zinc-900/50 hover:bg-zinc-800/80 px-3 py-1.5 text-xs text-zinc-300 transition-colors mr-1"
           >
             <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
             <span>DSSA Website</span>
           </a>
 
           {/* When User is Logged In */}
-          {userId ? (
-            <div className="flex items-center gap-3">
+          {user ? (
+            <div className="flex items-center gap-2 sm:gap-3">
+              {/* Role Badge */}
+              <span className={`hidden sm:inline-flex items-center text-[10px] font-mono px-2 py-0.5 rounded border ${ROLE_METADATA_CONFIG[user.role].badgeClass}`}>
+                {user.role}
+              </span>
+
+              {/* Navigation links based on role */}
               <Link
                 href="/dashboard"
-                className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-950/40 hover:bg-emerald-950/60 px-3 py-1.5 text-xs font-medium text-emerald-300 transition-colors"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-zinc-900/60 hover:bg-zinc-800 px-2.5 py-1.5 text-xs font-medium text-zinc-200 transition-colors"
               >
-                <LayoutDashboard className="h-3.5 w-3.5" />
-                <span>Dashboard</span>
+                <LayoutDashboard className="h-3.5 w-3.5 text-emerald-400" />
+                <span className="hidden md:inline">Dashboard</span>
               </Link>
+
+              {hasMinimumRole(user.role, "MEMBER") && (
+                <Link
+                  href="/attendance"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/20 bg-emerald-950/20 hover:bg-emerald-950/40 px-2.5 py-1.5 text-xs font-medium text-emerald-300 transition-colors"
+                >
+                  <QrCode className="h-3.5 w-3.5" />
+                  <span className="hidden md:inline">Attendance</span>
+                </Link>
+              )}
+
+              {hasMinimumRole(user.role, "HOST") && (
+                <Link
+                  href="/host"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/20 bg-cyan-950/20 hover:bg-cyan-950/40 px-2.5 py-1.5 text-xs font-medium text-cyan-300 transition-colors"
+                >
+                  <Smartphone className="h-3.5 w-3.5" />
+                  <span className="hidden md:inline">Host</span>
+                </Link>
+              )}
+
+              {hasMinimumRole(user.role, "ADMIN") && (
+                <Link
+                  href="/admin"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/20 bg-blue-950/20 hover:bg-blue-950/40 px-2.5 py-1.5 text-xs font-medium text-blue-300 transition-colors"
+                >
+                  <Settings className="h-3.5 w-3.5" />
+                  <span className="hidden md:inline">Admin</span>
+                </Link>
+              )}
 
               <UserButton
                 appearance={{

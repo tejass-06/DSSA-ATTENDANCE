@@ -1,5 +1,5 @@
-import { currentUser, auth } from "@clerk/nextjs/server";
-import { redirect } from "next/navigation";
+import { requireAuth } from "@/lib/auth/server";
+import { ROLE_METADATA_CONFIG } from "@/lib/auth/roles";
 import Image from "next/image";
 import Link from "next/link";
 import { Navbar } from "@/components/Navbar";
@@ -12,28 +12,16 @@ import {
   Key,
   LogOut,
   Calendar,
-  CheckCircle2,
+  ArrowRight,
+  Smartphone,
+  Shield,
+  QrCode,
+  Info,
 } from "lucide-react";
 
 export default async function DashboardPage() {
-  const { userId } = await auth();
-
-  if (!userId) {
-    redirect("/sign-in");
-  }
-
-  const user = await currentUser();
-
-  const fullName =
-    user?.firstName && user?.lastName
-      ? `${user.firstName} ${user.lastName}`
-      : user?.firstName || user?.username || "DSSA Member";
-
-  const primaryEmail =
-    user?.emailAddresses.find((e) => e.id === user.primaryEmailAddressId)
-      ?.emailAddress ||
-    user?.emailAddresses[0]?.emailAddress ||
-    "No email registered";
+  const user = await requireAuth();
+  const roleConfig = ROLE_METADATA_CONFIG[user.role];
 
   return (
     <div className="flex min-h-screen flex-col bg-[#030712] text-slate-100 selection:bg-emerald-500/20 selection:text-emerald-300">
@@ -48,15 +36,22 @@ export default async function DashboardPage() {
           {/* Header section */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-white/[0.08] pb-6">
             <div>
-              <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-950/30 px-3 py-1 text-xs text-emerald-400 font-mono mb-2">
-                <ShieldCheck className="h-3.5 w-3.5" />
-                <span>AUTHENTICATED SESSION</span>
+              <div className="flex flex-wrap items-center gap-2 mb-2">
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-950/30 px-3 py-1 text-xs text-emerald-400 font-mono">
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  <span>AUTHENTICATED</span>
+                </span>
+                <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-mono font-semibold ${roleConfig.badgeClass}`}>
+                  <Shield className="h-3.5 w-3.5" />
+                  <span>ROLE: {user.role}</span>
+                </span>
               </div>
+
               <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
                 DSSA ATTENDANCE
               </h1>
               <p className="mt-1 text-sm text-zinc-400">
-                Welcome, <span className="font-semibold text-emerald-300">{fullName}</span>. You are signed in successfully.
+                Welcome, <span className="font-semibold text-white">{user.name}</span>.
               </p>
             </div>
 
@@ -86,19 +81,19 @@ export default async function DashboardPage() {
               <div className="flex items-center gap-2">
                 <div className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse-subtle" />
                 <h2 className="font-mono text-xs uppercase tracking-wider text-zinc-300">
-                  VERIFIED CLERK IDENTITY (SERVER-RETRIEVED)
+                  SERVER-VERIFIED IDENTITY &amp; AUTHORIZATION
                 </h2>
               </div>
               <span className="font-mono text-[11px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
-                ACTIVE
+                VERIFIED
               </span>
             </div>
 
             <div className="flex flex-col sm:flex-row items-start sm:items-center gap-5">
-              {user?.imageUrl ? (
+              {user.imageUrl ? (
                 <Image
                   src={user.imageUrl}
-                  alt={fullName}
+                  alt={user.name}
                   width={72}
                   height={72}
                   className="rounded-2xl border border-emerald-500/30 object-cover shadow-lg"
@@ -110,56 +105,157 @@ export default async function DashboardPage() {
               )}
 
               <div className="space-y-1">
-                <h3 className="text-xl font-bold text-white">{fullName}</h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-xl font-bold text-white">{user.name}</h3>
+                  <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${roleConfig.badgeClass}`}>
+                    {roleConfig.label}
+                  </span>
+                </div>
                 <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-400 font-mono">
                   <span className="flex items-center gap-1.5">
                     <Mail className="h-3.5 w-3.5 text-zinc-500" />
-                    {primaryEmail}
+                    {user.email}
                   </span>
                 </div>
+                <p className="text-xs text-zinc-400 pt-1">
+                  {roleConfig.description}
+                </p>
               </div>
             </div>
 
-            {/* Authentication Details Grid */}
+            {/* Authentication & Authorization Details */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-white/[0.06]">
               <div className="rounded-xl border border-white/[0.06] bg-zinc-950/60 p-4">
                 <div className="flex items-center gap-2 text-xs font-mono text-zinc-400 mb-1">
                   <Key className="h-3.5 w-3.5 text-cyan-400" />
                   <span>CLERK USER ID</span>
                 </div>
-                <p className="font-mono text-xs text-zinc-200 truncate">{user?.id}</p>
+                <p className="font-mono text-xs text-zinc-200 truncate">{user.userId}</p>
               </div>
 
               <div className="rounded-xl border border-white/[0.06] bg-zinc-950/60 p-4">
                 <div className="flex items-center gap-2 text-xs font-mono text-zinc-400 mb-1">
                   <Calendar className="h-3.5 w-3.5 text-emerald-400" />
-                  <span>SESSION VERIFIED AT</span>
+                  <span>AUTH TRUST BOUNDARY</span>
                 </div>
                 <p className="font-mono text-xs text-zinc-200">
-                  {new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} (Server Timestamp)
+                  Server-side Verified (Phase 3)
                 </p>
               </div>
             </div>
           </div>
 
-          {/* Phase 2 Authentication Verification Notice */}
-          <div className="rounded-2xl border border-emerald-500/20 bg-emerald-950/10 p-5 backdrop-blur-md">
+          {/* Role-Based Navigation & Access Verification Launchers */}
+          <div className="space-y-4">
+            <h2 className="font-mono text-xs uppercase tracking-wider text-zinc-400">
+              AVAILABLE ROLE MODULES (SERVER-ENFORCED)
+            </h2>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {/* Member Attendance Link */}
+              <div className="dssa-card rounded-xl p-5 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="h-9 w-9 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                      <QrCode className="h-4 w-4" />
+                    </div>
+                    <span className="font-mono text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">
+                      MEMBER+
+                    </span>
+                  </div>
+                  <h3 className="font-semibold text-sm text-white">Attendance Module</h3>
+                  <p className="mt-1 text-xs text-zinc-400">
+                    Scan rotating QR challenges and submit attendance.
+                  </p>
+                </div>
+                <div className="mt-4 pt-3 border-t border-white/[0.06]">
+                  <Link
+                    href="/attendance"
+                    className="inline-flex items-center gap-1.5 text-xs font-mono text-emerald-400 hover:text-emerald-300 font-medium"
+                  >
+                    <span>Open Attendance</span>
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </Link>
+                </div>
+              </div>
+
+              {/* Host Mode Link */}
+              <div className="dssa-card rounded-xl p-5 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="h-9 w-9 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
+                      <Smartphone className="h-4 w-4" />
+                    </div>
+                    <span className="font-mono text-[10px] text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded">
+                      HOST+
+                    </span>
+                  </div>
+                  <h3 className="font-semibold text-sm text-white">Host Mode</h3>
+                  <p className="mt-1 text-xs text-zinc-400">
+                    Host active room session and project rotating QR.
+                  </p>
+                </div>
+                <div className="mt-4 pt-3 border-t border-white/[0.06]">
+                  <Link
+                    href="/host"
+                    className="inline-flex items-center gap-1.5 text-xs font-mono text-cyan-400 hover:text-cyan-300 font-medium"
+                  >
+                    <span>Open Host Mode</span>
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </Link>
+                </div>
+              </div>
+
+              {/* Admin Center Link */}
+              <div className="dssa-card rounded-xl p-5 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="h-9 w-9 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+                      <Shield className="h-4 w-4" />
+                    </div>
+                    <span className="font-mono text-[10px] text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded">
+                      ADMIN+
+                    </span>
+                  </div>
+                  <h3 className="font-semibold text-sm text-white">Admin Center</h3>
+                  <p className="mt-1 text-xs text-zinc-400">
+                    Manage members, room coordinates, and reports.
+                  </p>
+                </div>
+                <div className="mt-4 pt-3 border-t border-white/[0.06]">
+                  <Link
+                    href="/admin"
+                    className="inline-flex items-center gap-1.5 text-xs font-mono text-blue-400 hover:text-blue-300 font-medium"
+                  >
+                    <span>Open Admin</span>
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Development Role Assignment Information Box */}
+          <div className="rounded-2xl border border-white/10 bg-zinc-950/70 p-5 backdrop-blur-md">
             <div className="flex items-start gap-3">
-              <CheckCircle2 className="h-5 w-5 text-emerald-400 shrink-0 mt-0.5" />
-              <div className="space-y-1 text-xs text-zinc-300">
+              <Info className="h-5 w-5 text-cyan-400 shrink-0 mt-0.5" />
+              <div className="space-y-2 text-xs text-zinc-300">
                 <p className="font-semibold text-white">
-                  Phase 2 Authentication Verification Passed
+                  Development &amp; Testing: Assigning User Roles
                 </p>
                 <p className="text-zinc-400 leading-relaxed">
-                  Clerk authentication is fully operational. Server components safely retrieve authenticated user credentials without trusting client inputs.
-                  Subsequent features (User Roles, Database, Sessions, Geofencing) will be implemented in upcoming phases.
+                  Roles are stored securely in Clerk user <code className="font-mono text-cyan-400">publicMetadata</code>.
+                  To assign a test role in development, open your <a href="https://dashboard.clerk.com" target="_blank" rel="noopener noreferrer" className="text-cyan-400 underline">Clerk Dashboard</a> &rarr; <strong>Users</strong> &rarr; Select User &rarr; <strong>Public Metadata</strong> &rarr; Set:
                 </p>
+                <div className="rounded-lg bg-black/60 border border-white/10 p-2.5 font-mono text-xs text-emerald-400">
+                  {'{ "role": "ADMIN" }'} <span className="text-zinc-500">{"// Values: SUPER_ADMIN, ADMIN, HOST, MEMBER, PENDING"}</span>
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Action Links */}
-          <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+          {/* Return link */}
+          <div className="flex items-center justify-between pt-2">
             <Link
               href="/"
               className="inline-flex items-center gap-1.5 text-xs font-mono text-zinc-400 hover:text-white transition-colors"
