@@ -1,13 +1,14 @@
 /**
  * DSSA Room Attendance System
  * Centralized Attendance Submission Service
- * Phase 10: Member QR Scanning + Attendance Submission
+ * Phase 11: Geolocation Capture + Location Validation
  */
 import { prisma } from "@/lib/db";
 import { AttendanceStatus, SessionStatus } from "@prisma/client";
 import { validateQRChallenge } from "@/lib/qr/service";
 import { QR_PROTOCOL_PREFIX } from "@/lib/qr/config";
 import { appRoleToPrismaRole, hasMinimumRole, type AppRole } from "@/lib/auth/roles";
+import { validateMemberLocation, type ClientLocationInput } from "@/lib/geo/service";
 import { Prisma } from "@prisma/client";
 
 export interface AttendanceSubmissionResult {
@@ -24,6 +25,7 @@ export interface AttendanceSubmissionResult {
     markedAt: string;
     status: string;
     attendeeName: string;
+    distanceMeters?: number;
   };
 }
 
@@ -35,12 +37,13 @@ export interface UserContextParam {
 }
 
 /**
- * Validates and records member attendance.
- * Server is the sole authority for identity, session validity, QR token validation, and timestamp.
+ * Validates and records member attendance with QR token verification and geolocation validation.
+ * Server is the sole authority for identity, session validity, QR validity, location calculation, and timestamp.
  */
 export async function processAttendanceSubmission(
   userContext: UserContextParam | null,
-  rawPayloadInput: unknown
+  rawPayloadInput: unknown,
+  locationInput?: ClientLocationInput | unknown
 ): Promise<AttendanceSubmissionResult> {
   // 1. Authenticate member
   if (!userContext || !userContext.userId) {
@@ -134,10 +137,21 @@ export async function processAttendanceSubmission(
     };
   }
 
-
   const session = qrValidation.session;
 
-  // 6. Ensure MySQL User record is synchronized
+  // 6. Geolocation Validation (Phase 11 service)
+  const locationValidation = await validateMemberLocation(session.id, locationInput);
+  if (!locationValidation.valid) {
+    return {
+      success: false,
+      error: locationValidation.error || "Location verification failed.",
+      errorCode: locationValidation.errorCode || "LOCATION_VALIDATION_FAILED",
+    };
+  }
+
+  const calculatedDistance = locationValidation.distanceMeters ?? 0;
+
+  // 7. Ensure MySQL User record is synchronized
   const prismaRole = appRoleToPrismaRole(userContext.role);
   const dbUser = await prisma.user.upsert({
     where: { clerkId: userContext.userId },
@@ -154,7 +168,7 @@ export async function processAttendanceSubmission(
     },
   });
 
-  // 7. Check for existing attendance record
+  // 8. Check for existing attendance record
   const existingRecord = await prisma.attendanceRecord.findUnique({
     where: {
       sessionId_userId: {
@@ -185,11 +199,12 @@ export async function processAttendanceSubmission(
         markedAt: existingRecord.markedAt.toISOString(),
         status: existingRecord.status,
         attendeeName: existingRecord.user.name || userContext.name,
+        distanceMeters: Math.round(calculatedDistance),
       },
     };
   }
 
-  // 8. Atomically create AttendanceRecord (handles concurrent race conditions gracefully)
+  // 9. Atomically create AttendanceRecord (handles concurrent race conditions gracefully)
   const serverMarkedAt = new Date();
 
   try {
@@ -214,7 +229,7 @@ export async function processAttendanceSubmission(
         },
       });
 
-      // Create audit log entry
+      // Create audit log entry with safe distance metadata (no raw personal coordinates)
       await tx.auditLog.create({
         data: {
           actorUserId: dbUser.id,
@@ -224,6 +239,8 @@ export async function processAttendanceSubmission(
           metadata: JSON.stringify({
             sessionId: session.id,
             status: AttendanceStatus.PRESENT,
+            distanceMeters: Math.round(calculatedDistance),
+            accuracyMeters: locationValidation.accuracyMeters,
             serverMarkedAt: serverMarkedAt.toISOString(),
           }),
         },
@@ -244,6 +261,7 @@ export async function processAttendanceSubmission(
         markedAt: serverMarkedAt.toISOString(),
         status: AttendanceStatus.PRESENT,
         attendeeName: userContext.name,
+        distanceMeters: Math.round(calculatedDistance),
       },
     };
   } catch (err) {
@@ -284,6 +302,7 @@ export async function processAttendanceSubmission(
             markedAt: duplicateRecord.markedAt.toISOString(),
             status: duplicateRecord.status,
             attendeeName: duplicateRecord.user.name || userContext.name,
+            distanceMeters: Math.round(calculatedDistance),
           },
         };
       }

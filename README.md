@@ -9,8 +9,8 @@ Official, production-quality, mobile-first room attendance management system bui
 The DSSA Room Attendance System provides controlled, tamper-resistant digital attendance for DSSA meetings, workshops, and committee sessions.
 
 - **Host Mode (Admin/Host Phone):** The host uses their smartphone to select active venues, initiate room attendance sessions, display cryptographic rotating QR challenges, and monitor session telemetry.
-- **Member Attendance (Member Phone):** Committee members authenticate on their phones, scan dynamic QR challenges with their device camera, and submit cryptographic tokens for server-side verification.
-- **Layered Anti-Proxy Security:** Combines Clerk authentication, dynamic rotating QR challenges, database unique constraints `@@unique([sessionId, userId])`, server timestamps, and audit logging to minimize proxy attendance.
+- **Member Attendance (Member Phone):** Committee members authenticate on their phones, scan dynamic QR challenges with their device camera, grant device geolocation access, and submit cryptographic tokens and coordinates for server-side verification.
+- **Layered Anti-Proxy Security:** Combines Clerk authentication, dynamic rotating QR challenges, server-side Haversine distance calculations against database room coordinates, database unique constraints `@@unique([sessionId, userId])`, server timestamps, and audit logging to minimize proxy attendance.
 
 ---
 
@@ -29,7 +29,7 @@ The application enforces strict server-side authorization boundaries. A logged-i
 | **`SUPER_ADMIN`** | 40 | Full system authority. System settings, administrator management, audit log access, host operations. |
 | **`ADMIN`** | 30 | Committee administration. Member management, room coordinates configuration, session overview, host operations. |
 | **`HOST`** | 20 | Room session host. Initiating active attendance sessions, managing room state, displaying rotating QR codes. |
-| **`MEMBER`** | 10 | Active committee member. Scanning rotating QR challenges and viewing individual attendance records. |
+| **`MEMBER`** | 10 | Active committee member. Scanning rotating QR challenges, submitting verified geolocation, and viewing attendance. |
 | **`PENDING`** | 0 | **Default for new accounts.** Awaiting administrator verification and role assignment. |
 
 ### 3. Server-Side Enforcement Helpers
@@ -37,6 +37,24 @@ Located in `src/lib/auth/server.ts`:
 - `getCurrentUserWithRole()`: Safely retrieves user context and derives application role from server session.
 - `requireRole(minimumRole)`: Verifies role hierarchy server-side; redirects unauthorized users to `/unauthorized`.
 - `requireAnyRole([roles])`: Enforces exact role whitelist server-side.
+
+---
+
+## 📍 Geolocation Capture & Server Distance Validation (Phase 11)
+
+Located in `src/lib/geo/` and integrated into `/attendance`:
+
+- **Browser GPS Capture:** Point-in-time acquisition via `navigator.geolocation.getCurrentPosition` with `enableHighAccuracy: true` upon successful QR code detection.
+- **Server Coordinate & Accuracy Validation:**
+  - Validates coordinate bounds: `-90 <= latitude <= 90`, `-180 <= longitude <= 180`.
+  - Rejects NaN, Infinity, strings, and negative accuracy values.
+  - Enforces maximum acceptable uncertainty threshold: `MAX_ACCEPTABLE_LOCATION_ACCURACY_METERS = 100`.
+- **Numerically Safe Haversine Utility (`src/lib/geo/distance.ts`):** Great-circle distance calculation between member coordinates and authoritative session venue coordinates resolved from MySQL (`AttendanceSession -> Room`).
+- **Zero-Trust Client Boundary:** Client-supplied distances, `insideRoom` flags, or room IDs are ignored. The server independently calculates the distance.
+- **Privacy Conscious Logging:** Raw personal coordinates are never permanently logged; only sanitized distance and accuracy metadata are included in `AuditLog`.
+
+> [!NOTE]
+> Geolocation is one security signal and does not solely guarantee physical presence. Configurable room boundary enforcement (geofencing policies) belongs to **Phase 12**. Realtime attendance streaming belongs to **Phase 15**.
 
 ---
 
@@ -53,9 +71,6 @@ Located at `/attendance` and implemented in `src/lib/attendance/service.ts`, `sr
   - Enforces database duplicate protection via `@@unique([sessionId, userId])` with graceful concurrency handling.
   - Automatically records `AttendanceStatus.PRESENT` and creates immutable `AuditLog` entry.
 - **Zero-Trust Browser Architecture:** The browser is never trusted for user identity, timestamps, attendance status, session status, or expiration.
-
-> [!NOTE]
-> Geolocation capture and radius verification belong to **Phases 11–12**. Realtime streaming belongs to **Phase 15**.
 
 ---
 
@@ -107,6 +122,7 @@ The Administrative Control Center is located at `/admin` and strictly requires `
 - **Authentication:** Clerk (`@clerk/nextjs`, `@clerk/themes`)
 - **Database & ORM:** MySQL + Prisma 6.19.3
 - **QR Generation & Decoding:** `qrcode.react` (SVG) + `jsqr` (Canvas decoder)
+- **Geolocation Math:** Custom numerically-safe Haversine utility
 - **Language:** TypeScript
 - **Styling:** Tailwind CSS v4 + Vanilla CSS Design Tokens
 - **Icons:** Lucide React
@@ -125,9 +141,9 @@ The Administrative Control Center is located at `/admin` and strictly requires `
 - [x] **Phase 7: Host Mode Foundation**
 - [x] **Phase 8: Attendance Session Management**
 - [x] **Phase 9: Rotating QR Attendance System**
-- [x] **Phase 10: Member QR Scanning + Attendance Submission** *(Completed)*
-- [ ] **Phase 11: Geolocation Capture + Location Validation** *(Next)*
-- [ ] **Phase 12: Geofencing** *(Planned)*
+- [x] **Phase 10: Member QR Scanning + Attendance Submission**
+- [x] **Phase 11: Geolocation Capture + Location Validation** *(Completed)*
+- [ ] **Phase 12: Room Geofencing + Attendance Boundary Enforcement** *(Next)*
 - [ ] **Phase 13: Duplicate Protection & Server Validation Hardening** *(Planned)*
 - [ ] **Phase 14: Anti-Proxy Hardening** *(Planned)*
 - [ ] **Phase 15: Live Attendance** *(Planned)*

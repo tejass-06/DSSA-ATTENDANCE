@@ -15,9 +15,12 @@ import {
   Sparkles,
   Info,
   User,
+  MapPin,
+  Navigation,
 } from "lucide-react";
 import { submitAttendanceAction } from "@/app/attendance/actions";
 import type { AttendanceSubmissionResult } from "@/lib/attendance/service";
+import type { ClientLocationInput } from "@/lib/geo/service";
 
 interface QRScannerProps {
   userName: string;
@@ -28,6 +31,7 @@ type ScanStatus =
   | "idle"
   | "requesting"
   | "scanning"
+  | "acquiring_location"
   | "submitting"
   | "success"
   | "already_marked"
@@ -36,6 +40,7 @@ type ScanStatus =
 export function QRScanner({ userName, userRole }: QRScannerProps) {
   const [status, setStatus] = useState<ScanStatus>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [scannedPayload, setScannedPayload] = useState<string | null>(null);
   const [submissionResult, setSubmissionResult] =
     useState<AttendanceSubmissionResult | null>(null);
   const [facingMode, setFacingMode] = useState<"environment" | "user">(
@@ -49,7 +54,7 @@ export function QRScanner({ userName, userRole }: QRScannerProps) {
   const animationFrameRef = useRef<number | null>(null);
   const isProcessingRef = useRef<boolean>(false);
 
-  // Stop camera tracks cleanly
+  // Stop camera stream cleanly
   const stopCamera = useCallback(() => {
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
@@ -85,34 +90,97 @@ export function QRScanner({ userName, userRole }: QRScannerProps) {
     };
   }, [stopCamera]);
 
-  // Handle scanned payload
-  const handleDetectedPayload = useCallback(async (rawQrText: string) => {
-    if (isProcessingRef.current) return;
-    isProcessingRef.current = true;
-    stopCamera();
-    setStatus("submitting");
+  // Request location and submit attendance
+  const acquireLocationAndSubmit = useCallback(
+    (payloadToSubmit: string) => {
+      setStatus("acquiring_location");
+      setErrorMessage(null);
 
-    try {
-      const result = await submitAttendanceAction(rawQrText);
-      setSubmissionResult(result);
-
-      if (result.success) {
-        if (result.alreadyMarked) {
-          setStatus("already_marked");
-        } else {
-          setStatus("success");
-        }
-      } else {
-        setErrorMessage(result.error || "Attendance submission failed.");
+      if (typeof window === "undefined" || !navigator.geolocation) {
         setStatus("error");
+        setErrorMessage(
+          "Geolocation is not supported by your browser. Please use a modern mobile browser."
+        );
+        return;
       }
-    } catch {
-      setErrorMessage("Network or connection error. Please try again.");
-      setStatus("error");
-    } finally {
-      isProcessingRef.current = false;
-    }
-  }, [stopCamera]);
+
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          setStatus("submitting");
+
+          const locationData: ClientLocationInput = {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            accuracy: position.coords.accuracy,
+            timestamp: position.timestamp,
+          };
+
+          try {
+            const result = await submitAttendanceAction(
+              payloadToSubmit,
+              locationData
+            );
+            setSubmissionResult(result);
+
+            if (result.success) {
+              if (result.alreadyMarked) {
+                setStatus("already_marked");
+              } else {
+                setStatus("success");
+              }
+            } else {
+              setErrorMessage(result.error || "Attendance submission failed.");
+              setStatus("error");
+            }
+          } catch {
+            setErrorMessage("Network or connection error. Please try again.");
+            setStatus("error");
+          } finally {
+            isProcessingRef.current = false;
+          }
+        },
+        (geoError) => {
+          isProcessingRef.current = false;
+          setStatus("error");
+          if (geoError.code === geoError.PERMISSION_DENIED) {
+            setErrorMessage(
+              "Location permission was denied. Location verification is required to confirm attendance from the committee room."
+            );
+          } else if (geoError.code === geoError.POSITION_UNAVAILABLE) {
+            setErrorMessage(
+              "Location information is unavailable. Please check your device GPS / location settings."
+            );
+          } else if (geoError.code === geoError.TIMEOUT) {
+            setErrorMessage(
+              "Location request timed out. Please ensure you have a clear GPS signal and try again."
+            );
+          } else {
+            setErrorMessage("Unable to retrieve device location. Please try again.");
+          }
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0,
+        }
+      );
+    },
+    []
+  );
+
+  // Handle scanned payload
+  const handleDetectedPayload = useCallback(
+    (rawQrText: string) => {
+      if (isProcessingRef.current) return;
+      isProcessingRef.current = true;
+      stopCamera();
+      setScannedPayload(rawQrText);
+
+      // Trigger location acquisition immediately upon QR capture
+      acquireLocationAndSubmit(rawQrText);
+    },
+    [stopCamera, acquireLocationAndSubmit]
+  );
 
   const handleDetectedPayloadRef = useRef(handleDetectedPayload);
   useEffect(() => {
@@ -157,6 +225,7 @@ export function QRScanner({ userName, userRole }: QRScannerProps) {
     setStatus("requesting");
     setErrorMessage(null);
     setSubmissionResult(null);
+    setScannedPayload(null);
 
     if (
       typeof window === "undefined" ||
@@ -192,7 +261,6 @@ export function QRScanner({ userName, userRole }: QRScannerProps) {
         });
       }
     } catch (err: unknown) {
-
       stopCamera();
       setStatus("error");
       const error = err as Error;
@@ -235,7 +303,16 @@ export function QRScanner({ userName, userRole }: QRScannerProps) {
     stopCamera();
     setStatus("idle");
     setErrorMessage(null);
+    setScannedPayload(null);
     setSubmissionResult(null);
+  };
+
+  const retryLocation = () => {
+    if (scannedPayload) {
+      acquireLocationAndSubmit(scannedPayload);
+    } else {
+      startCamera();
+    }
   };
 
   return (
@@ -261,7 +338,7 @@ export function QRScanner({ userName, userRole }: QRScannerProps) {
               </h2>
               <p className="text-xs sm:text-sm text-zinc-400 max-w-md mx-auto">
                 Aim your device camera at the live rotating QR code shown on the
-                committee room projector or host screen.
+                committee room screen. Device location will be verified.
               </p>
             </div>
 
@@ -284,7 +361,7 @@ export function QRScanner({ userName, userRole }: QRScannerProps) {
           </div>
         )}
 
-        {/* 2. REQUESTING / STARTING STATE */}
+        {/* 2. REQUESTING / STARTING CAMERA STATE */}
         {status === "requesting" && (
           <div className="py-12 px-4 text-center space-y-4">
             <div className="mx-auto w-14 h-14 rounded-2xl bg-teal-500/10 border border-teal-500/30 flex items-center justify-center text-teal-400 animate-pulse">
@@ -299,10 +376,44 @@ export function QRScanner({ userName, userRole }: QRScannerProps) {
           </div>
         )}
 
-        {/* 3. SCANNING STATE */}
+        {/* 3. ACQUIRING LOCATION STATE */}
+        {status === "acquiring_location" && (
+          <div className="py-12 px-4 text-center space-y-4 animate-in fade-in duration-300">
+            <div className="mx-auto w-14 h-14 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 animate-pulse">
+              <Navigation className="w-7 h-7 animate-spin" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-base font-semibold text-white">
+                Acquiring Device Location...
+              </h3>
+              <p className="text-xs text-zinc-400 max-w-sm mx-auto">
+                Please allow location permission to verify your presence near the committee room.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* 4. SUBMITTING STATE */}
+        {status === "submitting" && (
+          <div className="py-12 px-4 text-center space-y-4 animate-in fade-in duration-300">
+            <div className="mx-auto w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+              <Sparkles className="w-7 h-7 animate-spin" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-base font-semibold text-white font-mono">
+                VERIFYING ATTENDANCE...
+              </h3>
+              <p className="text-xs text-zinc-400">
+                Validating cryptographic challenge & room distance on server
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* 5. SCANNING STATE */}
         <div
           className={`relative rounded-xl overflow-hidden bg-black aspect-square max-h-[380px] mx-auto border border-white/10 ${
-            status === "scanning" || status === "submitting" ? "block" : "hidden"
+            status === "scanning" ? "block" : "hidden"
           }`}
         >
           <video
@@ -314,7 +425,6 @@ export function QRScanner({ userName, userRole }: QRScannerProps) {
 
           {/* Viewfinder Overlay */}
           <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-            {/* Darkened corner mask */}
             <div className="relative w-56 h-56 sm:w-64 sm:h-64 border-2 border-emerald-400/80 rounded-2xl shadow-[0_0_20px_rgba(16,185,129,0.3)]">
               {/* Corner brackets */}
               <div className="absolute -top-1 -left-1 w-6 h-6 border-t-4 border-l-4 border-emerald-400 rounded-tl-lg" />
@@ -323,24 +433,9 @@ export function QRScanner({ userName, userRole }: QRScannerProps) {
               <div className="absolute -bottom-1 -right-1 w-6 h-6 border-b-4 border-r-4 border-emerald-400 rounded-br-lg" />
 
               {/* Laser scan line animation */}
-              {status === "scanning" && (
-                <div className="absolute left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-[0_0_8px_#10b981] animate-scan-laser" />
-              )}
+              <div className="absolute left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-[0_0_8px_#10b981] animate-scan-laser" />
             </div>
           </div>
-
-          {/* Submitting Spinner Overlay */}
-          {status === "submitting" && (
-            <div className="absolute inset-0 bg-black/75 backdrop-blur-sm flex flex-col items-center justify-center gap-3 text-emerald-400">
-              <Sparkles className="w-8 h-8 animate-spin" />
-              <p className="text-xs sm:text-sm font-mono tracking-wider font-semibold text-white">
-                VALIDATING & RECORDING ATTENDANCE...
-              </p>
-              <p className="text-[11px] text-zinc-400">
-                Verifying cryptographic token with server
-              </p>
-            </div>
-          )}
 
           {/* Scanner Controls Bar */}
           <div className="absolute bottom-3 inset-x-3 flex items-center justify-between pointer-events-auto">
@@ -366,7 +461,7 @@ export function QRScanner({ userName, userRole }: QRScannerProps) {
           </div>
         </div>
 
-        {/* 4. SUCCESS STATE */}
+        {/* 6. SUCCESS STATE */}
         {status === "success" && submissionResult?.record && (
           <div className="py-6 px-2 space-y-6 animate-in fade-in zoom-in duration-300">
             <div className="text-center space-y-2">
@@ -411,6 +506,15 @@ export function QRScanner({ userName, userRole }: QRScannerProps) {
                 </span>
               </div>
 
+              <div className="flex items-start justify-between border-b border-emerald-500/20 pb-2.5">
+                <span className="text-zinc-400 flex items-center gap-1.5">
+                  <MapPin className="w-4 h-4 text-emerald-400" /> Location:
+                </span>
+                <span className="font-mono text-emerald-300">
+                  Verified ({submissionResult.record.distanceMeters !== undefined ? `${submissionResult.record.distanceMeters}m from venue` : "Location Validated"})
+                </span>
+              </div>
+
               <div className="flex items-start justify-between">
                 <span className="text-zinc-400 flex items-center gap-1.5">
                   <Clock className="w-4 h-4 text-emerald-400" /> Server Time:
@@ -433,7 +537,7 @@ export function QRScanner({ userName, userRole }: QRScannerProps) {
               <button
                 type="button"
                 onClick={resetScanner}
-                className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-white/10 bg-zinc-900 hover:bg-zinc-800 text-xs font-mono text-zinc-300 transition-colors"
+                className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-white/10 bg-zinc-900 hover:bg-zinc-800 text-xs font-mono text-zinc-300 transition-colors cursor-pointer"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
                 <span>Done</span>
@@ -442,7 +546,7 @@ export function QRScanner({ userName, userRole }: QRScannerProps) {
           </div>
         )}
 
-        {/* 5. ALREADY MARKED STATE */}
+        {/* 7. ALREADY MARKED STATE */}
         {status === "already_marked" && submissionResult?.record && (
           <div className="py-6 px-2 space-y-6 animate-in fade-in zoom-in duration-300">
             <div className="text-center space-y-2">
@@ -490,7 +594,7 @@ export function QRScanner({ userName, userRole }: QRScannerProps) {
             <button
               type="button"
               onClick={resetScanner}
-              className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-white/10 bg-zinc-900 hover:bg-zinc-800 text-xs font-mono text-zinc-300 transition-colors"
+              className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-white/10 bg-zinc-900 hover:bg-zinc-800 text-xs font-mono text-zinc-300 transition-colors cursor-pointer"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Back to Scanner</span>
@@ -498,7 +602,7 @@ export function QRScanner({ userName, userRole }: QRScannerProps) {
           </div>
         )}
 
-        {/* 6. ERROR STATE */}
+        {/* 8. ERROR STATE */}
         {status === "error" && (
           <div className="py-6 px-2 space-y-6 animate-in fade-in zoom-in duration-300">
             <div className="text-center space-y-2">
@@ -509,23 +613,23 @@ export function QRScanner({ userName, userRole }: QRScannerProps) {
                 Attendance Could Not Be Recorded
               </h3>
               <p className="text-xs sm:text-sm text-rose-300 max-w-md mx-auto leading-relaxed">
-                {errorMessage || "An error occurred while validating the QR code."}
+                {errorMessage || "An error occurred while validating attendance."}
               </p>
             </div>
 
             <div className="flex flex-col sm:flex-row gap-3 pt-2">
               <button
                 type="button"
-                onClick={() => startCamera()}
-                className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-semibold text-xs bg-rose-600 hover:bg-rose-500 text-white font-mono tracking-wide transition-colors"
+                onClick={retryLocation}
+                className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-semibold text-xs bg-rose-600 hover:bg-rose-500 text-white font-mono tracking-wide transition-colors cursor-pointer"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
-                <span>TRY SCANNING AGAIN</span>
+                <span>{scannedPayload ? "RETRY LOCATION & SUBMIT" : "TRY SCANNING AGAIN"}</span>
               </button>
               <button
                 type="button"
                 onClick={resetScanner}
-                className="px-4 py-3 rounded-xl border border-white/10 bg-zinc-900 hover:bg-zinc-800 text-xs font-mono text-zinc-300 transition-colors"
+                className="px-4 py-3 rounded-xl border border-white/10 bg-zinc-900 hover:bg-zinc-800 text-xs font-mono text-zinc-300 transition-colors cursor-pointer"
               >
                 Cancel
               </button>

@@ -131,8 +131,14 @@ export async function GET() {
       name: pendingUser.name || "Pending",
     };
 
+    const validLocation = {
+      latitude: 28.6139,
+      longitude: 77.209,
+      accuracy: 10,
+    };
+
     // --- TEST 1: Authenticated MEMBER scans valid current QR ---
-    const res1 = await processAttendanceSubmission(memberAContext, challengeA.payload);
+    const res1 = await processAttendanceSubmission(memberAContext, challengeA.payload, validLocation);
     const dbRecordA = await prisma.attendanceRecord.findUnique({
       where: {
         sessionId_userId: {
@@ -151,7 +157,7 @@ export async function GET() {
     });
 
     // --- TEST 2: Same MEMBER scans the same valid QR again ---
-    const res2 = await processAttendanceSubmission(memberAContext, challengeA.payload);
+    const res2 = await processAttendanceSubmission(memberAContext, challengeA.payload, validLocation);
     results.push({
       testNumber: 2,
       name: "Duplicate attendance submission (same member)",
@@ -163,9 +169,9 @@ export async function GET() {
     // --- TEST 3: Concurrent duplicate submissions ---
     // Member B submits 3 concurrent requests simultaneously
     const [c1, c2, c3] = await Promise.all([
-      processAttendanceSubmission(memberBContext, challengeA.payload),
-      processAttendanceSubmission(memberBContext, challengeA.payload),
-      processAttendanceSubmission(memberBContext, challengeA.payload),
+      processAttendanceSubmission(memberBContext, challengeA.payload, validLocation),
+      processAttendanceSubmission(memberBContext, challengeA.payload, validLocation),
+      processAttendanceSubmission(memberBContext, challengeA.payload, validLocation),
     ]);
 
     const memberBRecords = await prisma.attendanceRecord.findMany({
@@ -185,7 +191,7 @@ export async function GET() {
     });
 
     // --- TEST 4: Unauthenticated request ---
-    const res4 = await processAttendanceSubmission(null, challengeA.payload);
+    const res4 = await processAttendanceSubmission(null, challengeA.payload, validLocation);
     results.push({
       testNumber: 4,
       name: "Unauthenticated request",
@@ -195,7 +201,7 @@ export async function GET() {
     });
 
     // --- TEST 5: PENDING user scans valid QR ---
-    const res5 = await processAttendanceSubmission(pendingContext, challengeA.payload);
+    const res5 = await processAttendanceSubmission(pendingContext, challengeA.payload, validLocation);
     results.push({
       testNumber: 5,
       name: "PENDING user scans valid QR",
@@ -205,8 +211,8 @@ export async function GET() {
     });
 
     // --- TEST 6: Malformed QR payload ---
-    const res6a = await processAttendanceSubmission(memberAContext, "NOT_JSON");
-    const res6b = await processAttendanceSubmission(memberAContext, JSON.stringify({ wrong: "payload" }));
+    const res6a = await processAttendanceSubmission(memberAContext, "NOT_JSON", validLocation);
+    const res6b = await processAttendanceSubmission(memberAContext, JSON.stringify({ wrong: "payload" }), validLocation);
     results.push({
       testNumber: 6,
       name: "Malformed / non-conforming QR payload",
@@ -222,7 +228,7 @@ export async function GET() {
       token: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
       exp: Date.now() + 30000,
     });
-    const res7 = await processAttendanceSubmission(memberAContext, fakePayload);
+    const res7 = await processAttendanceSubmission(memberAContext, fakePayload, validLocation);
     results.push({
       testNumber: 7,
       name: "Random / non-existent token",
@@ -275,7 +281,8 @@ export async function GET() {
         email: tempMember.email,
         name: tempMember.name!,
       },
-      expiredPayload
+      expiredPayload,
+      validLocation
     );
 
     results.push({
@@ -300,7 +307,8 @@ export async function GET() {
         email: tempMember.email,
         name: tempMember.name!,
       },
-      modifiedSidPayload
+      modifiedSidPayload,
+      validLocation
     );
     results.push({
       testNumber: 9,
@@ -324,7 +332,8 @@ export async function GET() {
         email: tempMember.email,
         name: tempMember.name!,
       },
-      crossSessionPayload
+      crossSessionPayload,
+      validLocation
     );
     results.push({
       testNumber: 10,
@@ -373,7 +382,8 @@ export async function GET() {
         email: tempMember.email,
         name: tempMember.name!,
       },
-      endedPayload
+      endedPayload,
+      validLocation
     );
 
     results.push({
@@ -394,7 +404,7 @@ export async function GET() {
     });
 
     // Member A attends Session B
-    const res12 = await processAttendanceSubmission(memberAContext, fakeUserIdPayload);
+    const res12 = await processAttendanceSubmission(memberAContext, fakeUserIdPayload, validLocation);
     const sessionBRecord = await prisma.attendanceRecord.findUnique({
       where: {
         sessionId_userId: {
@@ -421,7 +431,7 @@ export async function GET() {
       exp: Date.now() + 30000,
     });
 
-    const res13 = await processAttendanceSubmission(memberBContext, fakeTimePayload);
+    const res13 = await processAttendanceSubmission(memberBContext, fakeTimePayload, validLocation);
     const sessionBRecordB = await prisma.attendanceRecord.findUnique({
       where: {
         sessionId_userId: {
@@ -470,7 +480,8 @@ export async function GET() {
         email: tempMember2.email,
         name: tempMember2.name!,
       },
-      fakeStatusPayload
+      fakeStatusPayload,
+      validLocation
     );
 
     const record2 = await prisma.attendanceRecord.findUnique({
@@ -515,11 +526,13 @@ export async function GET() {
 
     const t1Res = await processAttendanceSubmission(
       { userId: tempAtt1.clerkId, role: "MEMBER", email: tempAtt1.email, name: tempAtt1.name! },
-      freshChallenge.payload
+      freshChallenge.payload,
+      validLocation
     );
     const t2Res = await processAttendanceSubmission(
       { userId: tempAtt2.clerkId, role: "MEMBER", email: tempAtt2.email, name: tempAtt2.name! },
-      freshChallenge.payload
+      freshChallenge.payload,
+      validLocation
     );
 
     results.push({
@@ -544,7 +557,8 @@ export async function GET() {
 
     const rotRes = await processAttendanceSubmission(
       { userId: tempAtt3.clerkId, role: "MEMBER", email: tempAtt3.email, name: tempAtt3.name! },
-      rotatedChallenge.payload
+      rotatedChallenge.payload,
+      validLocation
     );
 
     results.push({
@@ -576,8 +590,10 @@ export async function GET() {
 
     const cRes = await processAttendanceSubmission(
       { userId: tempAtt3.clerkId, role: "MEMBER", email: tempAtt3.email, name: tempAtt3.name! },
-      cChallenge.payload
+      cChallenge.payload,
+      validLocation
     );
+
 
     results.push({
       testNumber: 17,

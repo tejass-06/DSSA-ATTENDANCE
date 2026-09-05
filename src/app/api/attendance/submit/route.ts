@@ -2,7 +2,7 @@
  * DSSA Room Attendance System
  * Attendance Submission Route Handler
  * POST /api/attendance/submit
- * Phase 10: Member QR Scanning + Attendance Submission
+ * Phase 11: Geolocation Capture + Location Validation
  */
 import { NextResponse } from "next/server";
 import { getCurrentUserWithRole } from "@/lib/auth/server";
@@ -53,13 +53,29 @@ export async function POST(req: Request) {
       );
     }
 
-    // Accepts either { payload: "..." } or raw object
-    const rawPayload =
-      body && typeof body === "object" && "payload" in body
-        ? (body as { payload: unknown }).payload
-        : body;
+    // Parse payload and location from body
+    let rawPayload: unknown = body;
+    let locationInput: unknown = undefined;
 
-    const result = await processAttendanceSubmission(user, rawPayload);
+    if (body && typeof body === "object") {
+      const obj = body as Record<string, unknown>;
+      if ("payload" in obj) {
+        rawPayload = obj.payload;
+      }
+      if ("location" in obj) {
+        locationInput = obj.location;
+      } else if ("coords" in obj) {
+        locationInput = obj.coords;
+      } else if ("latitude" in obj && "longitude" in obj) {
+        locationInput = {
+          latitude: obj.latitude,
+          longitude: obj.longitude,
+          accuracy: obj.accuracy,
+        };
+      }
+    }
+
+    const result = await processAttendanceSubmission(user, rawPayload, locationInput);
 
     const status = result.success
       ? 200
