@@ -21,44 +21,32 @@ export default async function HostPage() {
   // 1. Strict server-side authorization check (requires HOST, ADMIN, or SUPER_ADMIN)
   const authUser = await requireRole("HOST");
 
-  // 2. Resolve application user in MySQL (auto-sync if needed)
-  const prismaRole = appRoleToPrismaRole(authUser.role);
-  const dbUser = await prisma.user.upsert({
-    where: { clerkId: authUser.userId },
-    update: {
-      email: authUser.email,
-      name: authUser.name,
-      role: prismaRole,
-    },
-    create: {
-      clerkId: authUser.userId,
-      email: authUser.email,
-      name: authUser.name,
-      role: prismaRole,
-    },
-  });
+  // 2. Resolve database user ID
+  const dbUserId = authUser.dbUserId;
 
   // 3. Query existing active session hosted by this user
-  const activeSession = await prisma.attendanceSession.findFirst({
-    where: {
-      hostUserId: dbUser.id,
-      status: SessionStatus.ACTIVE,
-    },
-    include: {
-      room: true,
-      host: {
-        select: {
-          name: true,
-          email: true,
+  const activeSession = dbUserId
+    ? await prisma.attendanceSession.findFirst({
+        where: {
+          hostUserId: dbUserId,
+          status: SessionStatus.ACTIVE,
         },
-      },
-      _count: {
-        select: {
-          records: true,
+        include: {
+          room: true,
+          host: {
+            select: {
+              name: true,
+              email: true,
+            },
+          },
+          _count: {
+            select: {
+              records: true,
+            },
+          },
         },
-      },
-    },
-  });
+      })
+    : null;
 
   // 4. If no active session, query active rooms and check in-use conflicts
   let activeRooms: Array<{

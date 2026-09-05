@@ -47,35 +47,45 @@ export async function getCurrentUserWithRole(): Promise<AuthenticatedUserContext
       : user.firstName || user.username || "DSSA Member";
 
   // Query authoritative MySQL User record
-  let dbUser = await prisma.user.findUnique({
-    where: { clerkId: user.id },
-    select: { id: true, role: true, email: true, name: true },
+  let dbUser = await prisma.user.findFirst({
+    where: {
+      OR: [{ clerkId: user.id }, { email: primaryEmail }],
+    },
+    select: { id: true, role: true, email: true, name: true, clerkId: true },
   });
 
   // If user does not exist in DB yet, create/sync with initial role from Clerk metadata
   if (!dbUser) {
     const initialRole = extractRoleFromMetadata(user.publicMetadata) as AppRole;
     try {
-      dbUser = await prisma.user.upsert({
-        where: { clerkId: user.id },
-        create: {
+      dbUser = await prisma.user.create({
+        data: {
           clerkId: user.id,
           email: primaryEmail,
           name: fullName,
           role: initialRole,
         },
-        update: {
-          email: primaryEmail,
-          name: fullName,
-        },
-        select: { id: true, role: true, email: true, name: true },
+        select: { id: true, role: true, email: true, name: true, clerkId: true },
       });
     } catch {
-      // Fallback if concurrent insert
-      dbUser = await prisma.user.findUnique({
-        where: { clerkId: user.id },
-        select: { id: true, role: true, email: true, name: true },
+      // Fallback if concurrent insert or already exists
+      dbUser = await prisma.user.findFirst({
+        where: {
+          OR: [{ clerkId: user.id }, { email: primaryEmail }],
+        },
+        select: { id: true, role: true, email: true, name: true, clerkId: true },
       });
+    }
+  } else if (dbUser.clerkId !== user.id) {
+    // Synchronize clerkId if matched by email
+    try {
+      dbUser = await prisma.user.update({
+        where: { id: dbUser.id },
+        data: { clerkId: user.id, name: fullName },
+        select: { id: true, role: true, email: true, name: true, clerkId: true },
+      });
+    } catch {
+      // Ignore sync error if locked
     }
   }
 
