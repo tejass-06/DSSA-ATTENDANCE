@@ -56,13 +56,22 @@ export async function Navbar() {
               </Link>
 
               {hasMinimumRole(user.role, "MEMBER") && (
-                <Link
-                  href="/attendance"
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/20 bg-emerald-950/20 hover:bg-emerald-950/40 px-2.5 py-1.5 text-xs font-medium text-emerald-300 transition-colors"
-                >
-                  <QrCode className="h-3.5 w-3.5" />
-                  <span className="hidden md:inline">Attendance</span>
-                </Link>
+                <>
+                  <Link
+                    href="/attendance"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/20 bg-emerald-950/20 hover:bg-emerald-950/40 px-2.5 py-1.5 text-xs font-medium text-emerald-300 transition-colors"
+                  >
+                    <QrCode className="h-3.5 w-3.5" />
+                    <span className="hidden md:inline">Scanner</span>
+                  </Link>
+
+                  <Link
+                    href="/attendance/history"
+                    className="hidden sm:inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-zinc-900/60 hover:bg-zinc-800 px-2.5 py-1.5 text-xs font-medium text-zinc-300 transition-colors"
+                  >
+                    <span className="hidden lg:inline">History</span>
+                  </Link>
+                </>
               )}
 
               {hasMinimumRole(user.role, "HOST") && (
@@ -84,6 +93,13 @@ export async function Navbar() {
                   <span className="hidden md:inline">Admin</span>
                 </Link>
               )}
+
+              <Link
+                href="/profile"
+                className="hidden lg:inline-flex items-center gap-1 rounded-lg border border-white/10 bg-zinc-900/60 hover:bg-zinc-800 px-2.5 py-1.5 text-xs font-medium text-zinc-300 transition-colors"
+              >
+                Profile
+              </Link>
 
               <UserButton
                 appearance={{

@@ -7,16 +7,20 @@ import {
   hasAnyRole,
 } from "./roles";
 
+import { prisma } from "@/lib/db";
+
 export interface AuthenticatedUserContext {
-  userId: string;
-  role: AppRole;
+  userId: string; // Clerk user ID (e.g. user_xxx)
+  dbUserId?: string; // MySQL User CUID id
+  role: AppRole; // MySQL User.role authoritative
   email: string;
   name: string;
   imageUrl?: string;
 }
 
 /**
- * Retrieves authenticated Clerk user and derives authorized application role server-side.
+ * Retrieves authenticated Clerk user and derives authorized application role from MySQL User.
+ * MySQL User.role is the definitive application authorization source of truth.
  * Never trusts client-supplied inputs.
  */
 export async function getCurrentUserWithRole(): Promise<AuthenticatedUserContext | null> {
@@ -32,8 +36,6 @@ export async function getCurrentUserWithRole(): Promise<AuthenticatedUserContext
     return null;
   }
 
-  const role = extractRoleFromMetadata(user.publicMetadata);
-
   const primaryEmail =
     user.emailAddresses.find((e) => e.id === user.primaryEmailAddressId)?.emailAddress ||
     user.emailAddresses[0]?.emailAddress ||
@@ -44,11 +46,47 @@ export async function getCurrentUserWithRole(): Promise<AuthenticatedUserContext
       ? `${user.firstName} ${user.lastName}`
       : user.firstName || user.username || "DSSA Member";
 
+  // Query authoritative MySQL User record
+  let dbUser = await prisma.user.findUnique({
+    where: { clerkId: user.id },
+    select: { id: true, role: true, email: true, name: true },
+  });
+
+  // If user does not exist in DB yet, create/sync with initial role from Clerk metadata
+  if (!dbUser) {
+    const initialRole = extractRoleFromMetadata(user.publicMetadata) as AppRole;
+    try {
+      dbUser = await prisma.user.upsert({
+        where: { clerkId: user.id },
+        create: {
+          clerkId: user.id,
+          email: primaryEmail,
+          name: fullName,
+          role: initialRole,
+        },
+        update: {
+          email: primaryEmail,
+          name: fullName,
+        },
+        select: { id: true, role: true, email: true, name: true },
+      });
+    } catch {
+      // Fallback if concurrent insert
+      dbUser = await prisma.user.findUnique({
+        where: { clerkId: user.id },
+        select: { id: true, role: true, email: true, name: true },
+      });
+    }
+  }
+
+  const role: AppRole = (dbUser?.role as AppRole) || (extractRoleFromMetadata(user.publicMetadata) as AppRole);
+
   return {
     userId: user.id,
+    dbUserId: dbUser?.id,
     role,
-    email: primaryEmail,
-    name: fullName,
+    email: dbUser?.email || primaryEmail,
+    name: dbUser?.name || fullName,
     imageUrl: user.imageUrl,
   };
 }

@@ -148,11 +148,11 @@ export default async function DashboardPage() {
           {/* Role-Based Navigation & Access Verification Launchers */}
           <div className="space-y-4">
             <h2 className="font-mono text-xs uppercase tracking-wider text-zinc-400">
-              AVAILABLE ROLE MODULES (SERVER-ENFORCED)
+              AVAILABLE MODULES &amp; ACTIONS
             </h2>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {/* Member Attendance Link */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Member Attendance Scanner */}
               <div className="dssa-card rounded-xl p-5 flex flex-col justify-between">
                 <div>
                   <div className="flex items-center justify-between mb-3">
@@ -163,9 +163,9 @@ export default async function DashboardPage() {
                       MEMBER+
                     </span>
                   </div>
-                  <h3 className="font-semibold text-sm text-white">Attendance Module</h3>
+                  <h3 className="font-semibold text-sm text-white">Attendance Scanner</h3>
                   <p className="mt-1 text-xs text-zinc-400">
-                    Scan rotating QR challenges and submit attendance.
+                    Scan active rotating room QR codes to check in.
                   </p>
                 </div>
                 <div className="mt-4 pt-3 border-t border-white/[0.06]">
@@ -173,7 +173,34 @@ export default async function DashboardPage() {
                     href="/attendance"
                     className="inline-flex items-center gap-1.5 text-xs font-mono text-emerald-400 hover:text-emerald-300 font-medium"
                   >
-                    <span>Open Attendance</span>
+                    <span>Open Scanner</span>
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </Link>
+                </div>
+              </div>
+
+              {/* Attendance History */}
+              <div className="dssa-card rounded-xl p-5 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="h-9 w-9 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
+                      <Calendar className="h-4 w-4" />
+                    </div>
+                    <span className="font-mono text-[10px] text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded">
+                      MEMBER+
+                    </span>
+                  </div>
+                  <h3 className="font-semibold text-sm text-white">My History</h3>
+                  <p className="mt-1 text-xs text-zinc-400">
+                    View verified check-in records and timestamps.
+                  </p>
+                </div>
+                <div className="mt-4 pt-3 border-t border-white/[0.06]">
+                  <Link
+                    href="/attendance/history"
+                    className="inline-flex items-center gap-1.5 text-xs font-mono text-cyan-400 hover:text-cyan-300 font-medium"
+                  >
+                    <span>View History</span>
                     <ArrowRight className="h-3.5 w-3.5" />
                   </Link>
                 </div>
@@ -183,22 +210,22 @@ export default async function DashboardPage() {
               <div className="dssa-card rounded-xl p-5 flex flex-col justify-between">
                 <div>
                   <div className="flex items-center justify-between mb-3">
-                    <div className="h-9 w-9 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
+                    <div className="h-9 w-9 rounded-lg bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
                       <Smartphone className="h-4 w-4" />
                     </div>
-                    <span className="font-mono text-[10px] text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded">
+                    <span className="font-mono text-[10px] text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded">
                       HOST+
                     </span>
                   </div>
                   <h3 className="font-semibold text-sm text-white">Host Mode</h3>
                   <p className="mt-1 text-xs text-zinc-400">
-                    Host active room session and project rotating QR.
+                    Start live room session and project rotating QR.
                   </p>
                 </div>
                 <div className="mt-4 pt-3 border-t border-white/[0.06]">
                   <Link
                     href="/host"
-                    className="inline-flex items-center gap-1.5 text-xs font-mono text-cyan-400 hover:text-cyan-300 font-medium"
+                    className="inline-flex items-center gap-1.5 text-xs font-mono text-purple-400 hover:text-purple-300 font-medium"
                   >
                     <span>Open Host Mode</span>
                     <ArrowRight className="h-3.5 w-3.5" />
@@ -219,7 +246,7 @@ export default async function DashboardPage() {
                   </div>
                   <h3 className="font-semibold text-sm text-white">Admin Center</h3>
                   <p className="mt-1 text-xs text-zinc-400">
-                    Manage members, room coordinates, and reports.
+                    Attendance ledger, analytics, rooms &amp; CSV exports.
                   </p>
                 </div>
                 <div className="mt-4 pt-3 border-t border-white/[0.06]">

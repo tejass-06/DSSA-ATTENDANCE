@@ -11,6 +11,7 @@ import {
   Calendar,
   ClipboardList,
   ScrollText,
+  BarChart3,
   Shield,
   ExternalLink,
   ChevronRight,
@@ -26,11 +27,12 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { name: "Overview", href: "/admin", icon: LayoutDashboard },
-  { name: "Members", href: "/admin/members", icon: Users },
-  { name: "Hosts", href: "/admin/hosts", icon: UserCheck },
+  { name: "Analytics", href: "/admin/analytics", icon: BarChart3 },
+  { name: "Attendance", href: "/admin/attendance", icon: ClipboardList },
   { name: "Rooms", href: "/admin/rooms", icon: Building },
   { name: "Sessions", href: "/admin/sessions", icon: Calendar },
-  { name: "Attendance", href: "/admin/attendance", icon: ClipboardList },
+  { name: "Members", href: "/admin/members", icon: Users },
+  { name: "Hosts", href: "/admin/hosts", icon: UserCheck },
   { name: "Audit Logs", href: "/admin/audit-logs", icon: ScrollText },
 ];
 
