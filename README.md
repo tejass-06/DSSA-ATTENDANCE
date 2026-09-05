@@ -8,9 +8,9 @@ Official, production-quality, mobile-first room attendance management system bui
 
 The DSSA Room Attendance System provides controlled, tamper-resistant digital attendance for DSSA meetings, workshops, and committee sessions.
 
-- **Host Mode (Admin/Host Phone):** The host uses their smartphone to select active venues, initiate room attendance sessions, display cryptographic rotating QR challenges, and monitor session telemetry.
+- **Host Mode (Admin/Host Phone):** The host uses their smartphone to select active venues, initiate room attendance sessions, display cryptographic rotating QR challenges, and monitor live attendance telemetry in real time.
 - **Member Attendance (Member Phone):** Committee members authenticate on their phones, scan dynamic QR challenges with their device camera, grant device geolocation access, and submit cryptographic tokens and coordinates for server-side verification.
-- **Layered Anti-Proxy Security:** Combines Clerk authentication, dynamic rotating QR challenges, server-side room geofence enforcement against database room radius boundaries, database unique constraints `@@unique([sessionId, userId])`, server timestamps, and audit logging to minimize proxy attendance.
+- **Layered Anti-Proxy Security:** Combines Clerk authentication, dynamic rotating QR challenges (10s TTL + 2s grace), server-side room geofence enforcement against database room radius boundaries, database unique constraints `@@unique([sessionId, userId])`, server timestamps, sliding-window rate limiting, and immutable audit logging.
 
 ---
 
@@ -19,24 +19,26 @@ The DSSA Room Attendance System provides controlled, tamper-resistant digital at
 ### 1. Authentication (Clerk)
 User identity and session security are managed via **Clerk** (`@clerk/nextjs` App Router integration with Next.js 16 `proxy.ts`).
 - **Public Routes:** `/`, `/sign-in`, `/sign-up`, `/unauthorized`
-- **Protected Base Routes:** `/dashboard`, `/admin`, `/host`, `/attendance`
+- **Protected Base Routes:** `/dashboard`, `/admin`, `/host`, `/attendance`, `/profile`, `/settings`
 
 ### 2. Authorization (Role-Based Access Control)
-The application enforces strict server-side authorization boundaries. A logged-in session does **not** automatically grant elevated permissions.
+The application enforces strict server-side authorization boundaries. **MySQL `User.role` is the single authoritative source of truth for application authorization.** A logged-in session or client metadata does **not** grant permissions without explicit database authorization.
 
 | Role | Hierarchy | Responsibilities & Access Boundaries |
 |---|:---:|---|
-| **`SUPER_ADMIN`** | 40 | Full system authority. System settings, administrator management, audit log access, host operations. |
-| **`ADMIN`** | 30 | Committee administration. Member management, room coordinates configuration, session overview, host operations. |
-| **`HOST`** | 20 | Room session host. Initiating active attendance sessions, managing room state, displaying rotating QR codes. |
-| **`MEMBER`** | 10 | Active committee member. Scanning rotating QR challenges, submitting verified geolocation, and viewing attendance. |
-| **`PENDING`** | 0 | **Default for new accounts.** Awaiting administrator verification and role assignment. |
+| **`SUPER_ADMIN`** | 40 | Full system authority. System settings, administrator management, audit logs, room management, CSV exports. |
+| **`ADMIN`** | 30 | Committee administration. Attendance ledger, analytics, room coordinates configuration, session logs, host operations. |
+| **`HOST`** | 20 | Room session host. Initiating active attendance sessions, managing room state, displaying rotating QR codes, monitoring live session channels. |
+| **`MEMBER`** | 10 | Active committee member. Scanning rotating QR challenges, submitting verified geolocation, and viewing personal attendance history. |
+| **`PENDING`** | 0 | **Default for new accounts.** Awaiting administrator verification and role assignment. Blocked from attendance submission. |
 
 ### 3. Server-Side Enforcement Helpers
 Located in `src/lib/auth/server.ts`:
-- `getCurrentUserWithRole()`: Safely retrieves user context and derives application role from server session.
+- `getCurrentUserWithRole()`: Safely retrieves user context and derives authoritative role from MySQL `User.role`.
 - `requireRole(minimumRole)`: Verifies role hierarchy server-side; redirects unauthorized users to `/unauthorized`.
 - `requireAnyRole([roles])`: Enforces exact role whitelist server-side.
+
+---
 
 ## ⚡ Realtime Live Attendance System (Phase 15)
 
@@ -63,140 +65,75 @@ Located in `src/lib/realtime/`, `src/hooks/useLiveAttendance.ts`, `src/component
 
 ---
 
+## 📈 Attendance & Admin Management (Phase 16)
+
+Located in `src/app/admin/`, `src/app/attendance/history/`, and `src/lib/csv/`:
+
+- **Attendance History Ledger (`/admin/attendance`)**: Server-side filtered and paginated (20 per page) ledger by status, date range, room, session, and member search.
+- **Attendance Detail View (`/admin/attendance/[id]`)**: Detailed verification provenance, member identity, venue boundaries, and timestamp auditing.
+- **Member Personal Attendance History (`/attendance/history`)**: Authoritatively scoped to authenticated user (`where: { userId: dbUser.id }`).
+- **Secure Server-Side CSV Export (`GET /api/admin/attendance/export`)**: Restricted to `ADMIN`/`SUPER_ADMIN`, RFC 4180 compliant, Spreadsheet Formula Injection (DDE) protected (`=`, `+`, `-`, `@`, `\t` escaped), 5,000 max row limit, with immutable audit logging.
+- **Attendance Analytics (`/admin/analytics`)**: Server-side database aggregations for total attendance, verification success rate, present/rejected breakdown, and session performance.
+- **Room Registry & Management (`/admin/rooms`)**: Room creation, coordinate updates, geofence radius bounds enforcement ($5\text{m} \le \text{radius} \le 500\text{m}$), and **Active Session Room Protection** (preventing coordinate changes or deactivation while an attendance session is active).
+- **Profile & Settings (`/profile`, `/settings`)**: Displays authoritative MySQL `User.role` badge and system operational policies.
+
+---
+
 ## 🛡️ Advanced Anti-Proxy Hardening (Phase 14)
 
 Located in `src/lib/security/`, `src/lib/attendance/service.ts`, and `src/app/api/dev/anti-proxy-test/route.ts`:
 
 - **Layered Threat Mitigation Model:**
-  - **QR & Screenshot Sharing (WhatsApp/Telegram):** Mitigated by short 10s rotation TTL + server-side session binding + active geofence verification.
+  - **QR & Screenshot Sharing:** Mitigated by 10s rotation TTL (2s transport grace) + server session binding + geofence verification.
   - **Remote Proxy Scanning:** Rejected by server-side Haversine geofence calculation against authoritative database room venue.
-  - **Automated Hammering & Brute Force:** Controlled via sliding-window rate limiting with bursts permitted for legitimate retries (5 requests / 10s burst; 20 requests / 60s sustained).
-  - **Client Spoofing Claims:** Client-submitted `trustedDevice`, `isTrusted`, `riskScore`, `bypassGeofence`, fake context IDs, fake room IDs, or fake coordinates are strictly ignored.
+  - **Automated Hammering & Brute Force:** Sliding-window rate limiting (5 requests / 10s burst; 20 requests / 60s sustained).
+  - **Client Spoofing Claims:** Client-submitted `trustedDevice`, `riskScore`, fake context IDs, fake room IDs, or fake coordinates are strictly ignored.
 - **Privacy-Conscious Design:**
   - **NO Invasive Device Fingerprinting:** Strictly avoids Canvas, WebGL, font fingerprinting, hardware identifiers, MAC addresses, or IMEI numbers.
-  - **Privacy-Preserving Audit Logging:** Security audit events (`RATE_LIMITED`, `QR_INVALID`, `QR_EXPIRED`, `LOCATION_OUTSIDE`, `LOCATION_UNCERTAIN`, `UNAUTHORIZED_ATTEMPT`) store only sanitized metadata—never raw coordinates or cryptographic tokens.
-- **Server-Side Authority Principle:**
-  - Authenticated identity (`auth().userId`), database application role (`User.role`), rotating challenge validity, room status, geofence status, and timestamp are independently computed and verified by the server.
-- **Realistic Security Boundary:**
-  - Browser geolocation and rotating QR codes represent defensive layers in depth. No client-side mechanism mathematically proves physical presence without trusted hardware; the system makes proxy attendance difficult, unrewarding, and auditable.
+  - **Privacy-Preserving Audit Logging:** Security audit events store only sanitized metadata—never raw coordinates or cryptographic tokens.
 
 ---
 
 ## 🛡️ Duplicate Protection & Server Validation Hardening (Phase 13)
 
-Located in `src/lib/attendance/service.ts`, `src/lib/qr/service.ts`, and `src/app/api/attendance/submit/route.ts`:
-
-- **Strict Source of Truth Boundaries:**
-  - **Identity:** Authenticated Clerk user session (`auth()`).
-  - **Application Authorization:** MySQL `User.role` is the definitive application role authority. Role modifications by administrators directly in the database cannot be overridden by client metadata or Clerk sign-in synchronizations.
-  - **Session & Room Authority:** Derived exclusively from database relations (`QRChallenge -> AttendanceSession -> Room`). Client-submitted `userId`, `roomId`, `distance`, `isInside`, or `radiusMeters` are strictly discarded.
-- **Payload & Token Structure Hardening:**
-  - Maximum raw JSON payload limit: $\le 4096$ characters.
-  - Token length limit: $16 \le \text{length} \le 256$ characters, strictly hexadecimal `^[0-9a-fA-F]+$`.
-  - Session ID length limit: $1 \le \text{length} \le 100$ characters.
-  - Strict protocol check (`DSSA_ATT_V1`).
 - **Atomic Database Transaction & Concurrency Defense:**
-  - Database transactions (`prisma.$transaction`) are deferred until client GPS coordinates are acquired.
-  - Immediately prior to database write, the transaction re-validates:
-    1. Session is still `ACTIVE` (guards against session-end races).
-    2. Room is still `isActive === true` (guards against venue-deactivation races).
-    3. User role is still authorized (guards against role-revocation races).
-    4. Member coordinates still satisfy latest room radius boundary.
-  - Final defense is the database unique constraint: `@@unique([sessionId, userId])`.
-  - Concurrent submissions (e.g. 10 rapid clicks, multi-tab scans) are cleanly captured via Prisma `P2002` error handling and mapped to a safe `ALREADY_MARKED` response.
-- **Information Leakage Prevention & Privacy-Conscious Auditing:**
-  - Raw cryptographic tokens, hashes, and personal GPS coordinates are never leaked in API responses, logs, or error payloads.
-  - Unified safe error responses (`UNAUTHORIZED`, `INVALID_QR`, `QR_EXPIRED`, `SESSION_NOT_ACTIVE`, `ROOM_UNAVAILABLE`, `LOCATION_INVALID`, `LOCATION_UNCERTAIN`, `LOCATION_OUTSIDE`, `ALREADY_MARKED`, `ATTENDANCE_FAILED`).
-  - Security endpoints enforce `Cache-Control: no-store`.
+  - Immediate pre-commit validation in `prisma.$transaction`: verifies session is `ACTIVE`, room is `isActive`, user is authorized, and geofence passes.
+  - Database unique constraint: `@@unique([sessionId, userId])`.
+  - Concurrent submissions resolve safely without race conditions.
 
 ---
 
 ## 🌐 Room Geofencing & Boundary Enforcement (Phase 12)
 
-Located in `src/lib/geo/geofence.ts` and integrated into `src/lib/geo/service.ts`:
-
-- **Authoritative Database Source:** Geofence radius is derived exclusively from `Room.radiusMeters` in MySQL (`AttendanceSession -> Room`). Client-supplied radius values or room IDs are ignored.
-- **Radius Sanity Validation:** Enforces `MIN_ROOM_RADIUS_METERS = 5` and `MAX_ROOM_RADIUS_METERS = 500`. Invalid or missing radius values fail closed.
+- **Authoritative Database Source:** Geofence radius is derived exclusively from `Room.radiusMeters` in MySQL.
+- **Radius Bounds:** `MIN_ROOM_RADIUS_METERS = 5` and `MAX_ROOM_RADIUS_METERS = 500`.
 - **Accuracy-Aware Boundary Policy:**
   - **`INSIDE` (`distance + accuracy <= radius`):** Member is comfortably inside the geofence; attendance proceeds.
   - **`OUTSIDE` (`distance - accuracy > radius`):** Member is outside the geofence; attendance is rejected (`LOCATION_OUTSIDE`).
-  - **`UNCERTAIN` (uncertainty overlaps boundary):** Conservative policy fails closed to eliminate false positives; member is prompted to retry from inside the room (`LOCATION_UNCERTAIN`).
-- **Fail Closed Guarantee:** Any inactive room, ended session, or unconfirmed boundary immediately aborts attendance creation.
-
-> [!NOTE]
-> Geofencing is one security layer in the defense-in-depth architecture. Browser GPS does not solely guarantee physical presence.
+  - **`UNCERTAIN` (uncertainty overlaps boundary):** Conservative policy fails closed (`LOCATION_UNCERTAIN`).
 
 ---
 
 ## 📍 Geolocation Capture & Server Distance Validation (Phase 11)
 
-Located in `src/lib/geo/`:
-
 - **Browser GPS Capture:** Point-in-time acquisition via `navigator.geolocation.getCurrentPosition` with `enableHighAccuracy: true` upon successful QR code detection.
-- **Server Coordinate & Accuracy Validation:**
-  - Validates coordinate bounds: `-90 <= latitude <= 90`, `-180 <= longitude <= 180`.
-  - Rejects NaN, Infinity, strings, and negative accuracy values.
-  - Enforces maximum acceptable uncertainty threshold: `MAX_ACCEPTABLE_LOCATION_ACCURACY_METERS = 100`.
-- **Numerically Safe Haversine Utility (`src/lib/geo/distance.ts`):** Great-circle distance calculation between member coordinates and authoritative session venue coordinates resolved from MySQL (`AttendanceSession -> Room`).
-- **Privacy Conscious Logging:** Raw personal coordinates are never permanently logged; only sanitized distance, accuracy, and geofence status metadata are recorded in `AuditLog`.
+- **Coordinate Bounds Validation:** `-90 <= latitude <= 90`, `-180 <= longitude <= 180`, max accuracy threshold $100\text{m}$.
+- **Numerically Safe Haversine Utility (`src/lib/geo/distance.ts`)**: Great-circle distance calculation.
 
 ---
 
 ## 📷 Member QR Scanning & Attendance Submission (Phase 10)
 
-Located at `/attendance` and implemented in `src/lib/attendance/service.ts`, `src/app/attendance/actions.ts`, and `src/components/attendance/QRScanner.tsx`:
-
-- **Member Camera Scanner:** Built with pure JavaScript `jsQR` Canvas video processing, camera permission handling, rear/front camera switching, reticle laser animation, and instant stream cleanup.
-- **Authoritative Server Submission:**
-  - Validates authenticated Clerk identity & role (`MEMBER`, `HOST`, `ADMIN`, `SUPER_ADMIN`; `PENDING` rejected).
-  - Validates QR protocol version (`DSSA_ATT_V1`).
-  - Calls Phase 9 `validateQRChallenge(sessionId, rawToken)` to check SHA-256 hash in MySQL, active session status, and server time expiration.
-  - Generates server timestamp (`markedAt: new Date()`).
-  - Enforces database duplicate protection via `@@unique([sessionId, userId])` with graceful concurrency handling.
-  - Automatically records `AttendanceStatus.PRESENT` and creates immutable `AuditLog` entry.
-- **Zero-Trust Browser Architecture:** The browser is never trusted for user identity, timestamps, attendance status, session status, or expiration.
+- **Member Camera Scanner:** Built with pure JavaScript `jsQR` Canvas video processing, camera permission handling, and stream cleanup.
+- **Authoritative Server Submission:** Validates Clerk identity, MySQL role, protocol version (`DSSA_ATT_V1`), rotating challenge nonce hash, and creates `AttendanceRecord`.
 
 ---
 
 ## ⚡ Rotating QR Challenge System (Phase 9)
 
-Located in `src/lib/qr/`:
 - **Cryptographic Generation:** Node.js `crypto.randomBytes(32)` produces 256-bit cryptographically random nonces.
-- **Token Storage Strategy:** Only the SHA-256 digest (`challengeHash`) is persisted in MySQL (`qr_challenges`), preventing database leaks of reusable plaintext tokens.
-- **Short-Lived Lifetime:** Tokens have a strict 10-second lifetime (`QR_CHALLENGE_TTL_MS = 10_000`).
-- **Session Binding:** Every QR challenge is strictly bound to a single `ACTIVE` `AttendanceSession`. Challenges generated for Session A are rejected for Session B.
-- **Host Display:** High-contrast `QRCodeSVG` with animated countdown bar, live rotation status, and fullscreen room presentation mode.
-- **Centralized Server Validation:** `validateQRChallenge(sessionId, rawToken)` verifies challenge existence, session status (`ACTIVE`), session binding, and server timestamp expiry.
-
----
-
-## 🔄 Attendance Session Management (Phase 8)
-
-### Session Lifecycle State Machine
-Located in `src/lib/session/lifecycle.ts`:
-- `SCHEDULED` &rarr; `ACTIVE` (Host initiates session)
-- `ACTIVE` &rarr; `ENDED` (Host or Admin concludes session)
-- `SCHEDULED` &rarr; `CANCELLED` (Host or Admin cancels scheduled session)
-- `ACTIVE` &rarr; `CANCELLED` (Host or Admin aborts active session)
-- Illegal transitions (e.g. `ENDED` &rarr; `ACTIVE`, `CANCELLED` &rarr; `ENDED`) are rejected server-side.
-
-### Session Routes
-- **`/host`**: Live session operational console (starts new session or displays currently active session with live rotating QR).
-- **`/host/sessions`**: Historical session registry of sessions created by the authenticated host.
-- **`/host/sessions/[id]`**: Dedicated operational session report with strict ownership authorization and QR broadcast.
-- **`/admin/sessions`**: System-wide session operations log with server-validated status filtering (`ALL`, `ACTIVE`, `ENDED`, `SCHEDULED`, `CANCELLED`).
-
----
-
-## 📱 Host Mode (Phase 7, 8, 9)
-
-Located at `/host` and accessible by `HOST`, `ADMIN`, and `SUPER_ADMIN`.
-
----
-
-## 📊 Admin Dashboard Foundation (Phase 6)
-
-The Administrative Control Center is located at `/admin` and strictly requires `ADMIN` or `SUPER_ADMIN` authorization.
+- **Token Storage Strategy:** Only the SHA-256 digest (`challengeHash`) is persisted in MySQL (`qr_challenges`).
+- **Short-Lived Lifetime:** Tokens have a strict 10-second base lifetime (`QR_CHALLENGE_TTL_MS = 10_000`) with 2-second transport grace period (`QR_GRACE_PERIOD_MS = 2_000`).
 
 ---
 
@@ -205,6 +142,7 @@ The Administrative Control Center is located at `/admin` and strictly requires `
 - **Framework:** Next.js 16 (App Router + Turbopack)
 - **Authentication:** Clerk (`@clerk/nextjs`, `@clerk/themes`)
 - **Database & ORM:** MySQL + Prisma 6.19.3
+- **Realtime:** Pusher Serverless WebSockets
 - **QR Generation & Decoding:** `qrcode.react` (SVG) + `jsqr` (Canvas decoder)
 - **Geolocation & Geofencing:** Numerically-safe Haversine math & accuracy-aware boundary engine
 - **Language:** TypeScript
@@ -230,20 +168,13 @@ The Administrative Control Center is located at `/admin` and strictly requires `
 - [x] **Phase 12: Room Geofencing + Attendance Boundary Enforcement**
 - [x] **Phase 13: Duplicate Protection + Server Validation Hardening**
 - [x] **Phase 14: Advanced Anti-Proxy Hardening**
-- [x] **Phase 15: Live Attendance** *(Completed)*
-- [ ] **Phase 16: Attendance History** *(Next)*
-- [ ] **Phase 17: CSV Export** *(Planned)*
-- [ ] **Phase 18: Room Management** *(Planned)*
-- [ ] **Phase 19: Profile & Settings** *(Planned)*
-- [ ] **Phase 20: Responsive / PWA Improvements** *(Planned)*
-- [ ] **Phase 21: Security Testing** *(Planned)*
-- [ ] **Phase 22: Performance Optimization** *(Planned)*
-- [ ] **Phase 23: Production Deployment** *(Planned)*
-- [ ] **Phase 24: Optional MySQL → PostgreSQL Migration** *(Planned)*
+- [x] **Phase 15: Realtime Live Attendance**
+- [x] **Phase 16: Attendance & Admin Management**
+- [x] **Phase 17: Final Security + Performance QA**
 
 ---
 
-## 💻 Local Development
+## 💻 Local Development & Quality Gates
 
 ```bash
 # Install dependencies
@@ -252,7 +183,7 @@ npm install
 # Run development server
 npm run dev
 
-# Run TypeScript check
+# Run TypeScript type check
 npx tsc --noEmit
 
 # Run ESLint check

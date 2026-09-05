@@ -113,7 +113,7 @@ export default async function SettingsPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 font-mono text-xs">
                 <div className="rounded-xl border border-white/[0.06] bg-zinc-950/60 p-3">
                   <span className="text-zinc-500 block text-[11px]">CHALLENGE ROTATION</span>
-                  <span className="text-cyan-400 font-bold">15 Seconds TTL</span>
+                  <span className="text-cyan-400 font-bold">10 Seconds TTL (2s grace)</span>
                 </div>
                 <div className="rounded-xl border border-white/[0.06] bg-zinc-950/60 p-3">
                   <span className="text-zinc-500 block text-[11px]">HASH ALGORITHM</span>
